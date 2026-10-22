@@ -318,6 +318,57 @@ bool DatabaseManager::applyMigrationsUnlocked() {
             executeSqlUnlocked("ROLLBACK;");
             return false;
         }
+        currentVersion = 2;
+    }
+
+    if (currentVersion < 3) {
+        const char* migrationV3Sql =
+            "BEGIN IMMEDIATE TRANSACTION;"
+            "CREATE TABLE IF NOT EXISTS document_chunks ("
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "    file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,"
+            "    chunk_index INTEGER NOT NULL,"
+            "    page_number INTEGER NOT NULL DEFAULT 1,"
+            "    mtime INTEGER NOT NULL DEFAULT 0,"
+            "    snippet_preview TEXT NOT NULL DEFAULT '',"
+            "    embedding BLOB NOT NULL,"
+            "    UNIQUE(file_id, chunk_index)"
+            ");"
+            "CREATE INDEX IF NOT EXISTS idx_document_chunks_file_id ON document_chunks(file_id);";
+
+        if (!executeSqlUnlocked(migrationV3Sql)) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+
+        ScopedStmt insertVerStmt;
+        const char* insertVerSql =
+            "INSERT INTO schema_migrations(version, applied_at, description) VALUES (?1, ?2, ?3);";
+        if (sqlite3_prepare_v2(m_db, insertVerSql, -1, insertVerStmt.receive(), nullptr) != SQLITE_OK) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+
+        const qint64 nowEpoch = QDateTime::currentSecsSinceEpoch();
+        sqlite3_bind_int(insertVerStmt.get(), 1, 3);
+        sqlite3_bind_int64(insertVerStmt.get(), 2, nowEpoch);
+        sqlite3_bind_text(insertVerStmt.get(),
+                          3,
+                          "Phase 3 document_chunks semantic vector storage schema",
+                          -1,
+                          SQLITE_STATIC);
+
+        if (sqlite3_step(insertVerStmt.get()) != SQLITE_DONE) {
+            insertVerStmt.reset();
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+        insertVerStmt.reset();
+
+        if (!executeSqlUnlocked("COMMIT;")) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
     }
 
     return true;
@@ -423,6 +474,36 @@ qint64 DatabaseManager::documentContentCount() const {
     }
     ScopedStmt stmt;
     if (sqlite3_prepare_v2(m_db, "SELECT COUNT(*) FROM document_content;", -1, stmt.receive(), nullptr) != SQLITE_OK) {
+        return 0;
+    }
+    if (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+        return sqlite3_column_int64(stmt.get(), 0);
+    }
+    return 0;
+}
+
+qint64 DatabaseManager::documentChunkCount() const {
+    QMutexLocker locker(&m_writeMutex);
+    if (m_db == nullptr) {
+        return 0;
+    }
+    ScopedStmt stmt;
+    if (sqlite3_prepare_v2(m_db, "SELECT COUNT(*) FROM document_chunks;", -1, stmt.receive(), nullptr) != SQLITE_OK) {
+        return 0;
+    }
+    if (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+        return sqlite3_column_int64(stmt.get(), 0);
+    }
+    return 0;
+}
+
+qint64 DatabaseManager::semanticEmbeddedFileCount() const {
+    QMutexLocker locker(&m_writeMutex);
+    if (m_db == nullptr) {
+        return 0;
+    }
+    ScopedStmt stmt;
+    if (sqlite3_prepare_v2(m_db, "SELECT COUNT(DISTINCT file_id) FROM document_chunks;", -1, stmt.receive(), nullptr) != SQLITE_OK) {
         return 0;
     }
     if (sqlite3_step(stmt.get()) == SQLITE_ROW) {
@@ -705,6 +786,7 @@ bool DatabaseManager::clearAllFiles() {
     }
     const char* sql =
         "BEGIN IMMEDIATE TRANSACTION;"
+        "DELETE FROM document_chunks;"
         "DELETE FROM document_content;"
         "DELETE FROM files;"
         "DELETE FROM indexing_checkpoints;"
@@ -856,6 +938,138 @@ bool DatabaseManager::optimizeDocumentFtsIndex() {
         return false;
     }
     return executeSqlUnlocked("INSERT INTO document_fts(document_fts) VALUES('optimize');");
+}
+
+QVector<SemanticExtractionCandidate> DatabaseManager::queryCandidatesForSemanticIndexing(
+    int maxTotalSemanticFiles) const {
+    QMutexLocker locker(&m_writeMutex);
+    QVector<SemanticExtractionCandidate> candidates;
+    if (m_db == nullptr || maxTotalSemanticFiles <= 0) {
+        return candidates;
+    }
+
+    int existingValidCount = 0;
+    {
+        ScopedStmt countStmt;
+        const char* countSql =
+            "SELECT COUNT(DISTINCT ch.file_id) FROM document_chunks ch "
+            "JOIN document_content dc ON dc.file_id = ch.file_id "
+            "WHERE ch.mtime = dc.mtime;";
+        if (sqlite3_prepare_v2(m_db, countSql, -1, countStmt.receive(), nullptr) == SQLITE_OK &&
+            sqlite3_step(countStmt.get()) == SQLITE_ROW) {
+            existingValidCount = sqlite3_column_int(countStmt.get(), 0);
+        }
+    }
+
+    const int remainingBudget = std::max(0, maxTotalSemanticFiles - existingValidCount);
+    if (remainingBudget == 0) {
+        return candidates;
+    }
+
+    const char* sql =
+        "SELECT dc.file_id, dc.mtime, dc.body_text, dc.page_offsets_json "
+        "FROM document_content dc "
+        "LEFT JOIN document_chunks ch ON ch.file_id = dc.file_id AND ch.chunk_index = 0 "
+        "WHERE dc.char_count > 0 "
+        "  AND (ch.id IS NULL OR ch.mtime != dc.mtime) "
+        "ORDER BY dc.mtime DESC "
+        "LIMIT ?1;";
+
+    ScopedStmt stmt;
+    if (sqlite3_prepare_v2(m_db, sql, -1, stmt.receive(), nullptr) != SQLITE_OK) {
+        return candidates;
+    }
+    sqlite3_bind_int(stmt.get(), 1, remainingBudget);
+
+    while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+        SemanticExtractionCandidate cand;
+        cand.fileId = sqlite3_column_int64(stmt.get(), 0);
+        cand.mtime = sqlite3_column_int64(stmt.get(), 1);
+        const char* rawBody = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 2));
+        const char* rawPages = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 3));
+        cand.bodyText = rawBody ? QString::fromUtf8(rawBody) : QString();
+        cand.pageOffsetsJson = rawPages ? QString::fromUtf8(rawPages) : QString();
+        candidates.append(std::move(cand));
+    }
+    return candidates;
+}
+
+bool DatabaseManager::replaceDocumentChunksBatch(const QVector<qint64>& fileIdsToClear,
+                                                 const QVector<DocumentChunkRecord>& records,
+                                                 const std::atomic_bool* cancelFlag) {
+    if (fileIdsToClear.isEmpty() && records.isEmpty()) {
+        return true;
+    }
+
+    QMutexLocker locker(&m_writeMutex);
+    if (m_db == nullptr) {
+        return false;
+    }
+
+    if (!executeSqlUnlocked("BEGIN IMMEDIATE TRANSACTION;")) {
+        return false;
+    }
+
+    if (!fileIdsToClear.isEmpty()) {
+        ScopedStmt delStmt;
+        if (sqlite3_prepare_v2(m_db, "DELETE FROM document_chunks WHERE file_id = ?1;", -1, delStmt.receive(), nullptr) != SQLITE_OK) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+        for (qint64 fid : fileIdsToClear) {
+            sqlite3_bind_int64(delStmt.get(), 1, fid);
+            const int rc = sqlite3_step(delStmt.get());
+            sqlite3_reset(delStmt.get());
+            if (rc != SQLITE_DONE) {
+                delStmt.reset();
+                executeSqlUnlocked("ROLLBACK;");
+                return false;
+            }
+        }
+    }
+
+    if (!records.isEmpty()) {
+        const char* insSql =
+            "INSERT INTO document_chunks(file_id, chunk_index, page_number, mtime, snippet_preview, embedding) "
+            "VALUES (?1, ?2, ?3, ?4, ?5, ?6);";
+        ScopedStmt insStmt;
+        if (sqlite3_prepare_v2(m_db, insSql, -1, insStmt.receive(), nullptr) != SQLITE_OK) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+
+        for (const DocumentChunkRecord& rec : records) {
+            if (cancelFlag != nullptr && cancelFlag->load(std::memory_order_relaxed)) {
+                insStmt.reset();
+                executeSqlUnlocked("ROLLBACK;");
+                return false;
+            }
+
+            const QByteArray previewUtf8 = rec.snippetPreview.toUtf8();
+            sqlite3_bind_int64(insStmt.get(), 1, rec.fileId);
+            sqlite3_bind_int(insStmt.get(), 2, rec.chunkIndex);
+            sqlite3_bind_int(insStmt.get(), 3, rec.pageNumber);
+            sqlite3_bind_int64(insStmt.get(), 4, rec.mtime);
+            sqlite3_bind_text(insStmt.get(), 5, previewUtf8.constData(), previewUtf8.size(), SQLITE_STATIC);
+            sqlite3_bind_blob(insStmt.get(), 6, rec.embeddingBlob.constData(), rec.embeddingBlob.size(), SQLITE_STATIC);
+
+            const int rc = sqlite3_step(insStmt.get());
+            sqlite3_reset(insStmt.get());
+            sqlite3_clear_bindings(insStmt.get());
+
+            if (rc != SQLITE_DONE) {
+                insStmt.reset();
+                executeSqlUnlocked("ROLLBACK;");
+                return false;
+            }
+        }
+    }
+
+    if (!executeSqlUnlocked("COMMIT;")) {
+        executeSqlUnlocked("ROLLBACK;");
+        return false;
+    }
+    return true;
 }
 
 bool DatabaseManager::updateCheckpoint(const QString& rootPath,

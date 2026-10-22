@@ -18,8 +18,11 @@ struct IndexingStatistics {
     qint64 filesDeleted = 0;
     qint64 directoriesVisited = 0;
     qint64 documentsContentIndexed = 0;
+    qint64 documentsSemanticIndexed = 0;
+    qint64 semanticChunksCreated = 0;
     double elapsedMs = 0.0;
     double contentExtractionMs = 0.0;
+    double semanticIndexingMs = 0.0;
     bool usnJournalAvailable = false;
     qint64 volumeNextUsn = 0;
 };
@@ -30,18 +33,21 @@ class FileIndexer : public QObject {
 public:
     static constexpr int kBatchTransactionSize = 5000;
     static constexpr int kContentBatchSize = 100;
+    static constexpr int kSemanticBatchSize = 25;
     static constexpr int kDefaultMaxContentFiles = 5000;
+    static constexpr int kDefaultMaxSemanticFiles = 2000;
     static constexpr qint64 kDefaultMaxDocumentBytes = 10LL * 1024LL * 1024LL;
 
     explicit FileIndexer(QObject* parent = nullptr);
     ~FileIndexer() override;
 
-    // Starts background enumeration, content extraction, and ReadDirectoryChangesW monitoring.
+    // Starts background enumeration, content extraction, optional semantic indexing, and ReadDirectoryChangesW monitoring.
     void startBackgroundIndexing(const QStringList& watchedRoots,
                                  const QStringList& ignoredDirNames,
                                  bool extractContent = true,
                                  int maxContentFiles = kDefaultMaxContentFiles,
-                                 qint64 maxDocumentBytes = kDefaultMaxDocumentBytes);
+                                 qint64 maxDocumentBytes = kDefaultMaxDocumentBytes,
+                                 bool enableSemanticIndexing = false);
 
     void stop();
 
@@ -58,6 +64,11 @@ public:
                                     qint64 maxDocumentBytes = kDefaultMaxDocumentBytes,
                                     double* outElapsedMs = nullptr);
 
+    // Runs bounded background semantic chunking & ONNX embedding pass, unloading the model when finished.
+    qint64 runSemanticIndexingPass(int maxSemanticFiles = kDefaultMaxSemanticFiles,
+                                   double* outElapsedMs = nullptr,
+                                   qint64* outChunksCreated = nullptr);
+
     // Applies incremental file change events (including incremental content extraction when applicable).
     void applyIncrementalChanges(const QVector<FileChangeEvent>& events,
                                  bool extractContent = true,
@@ -70,6 +81,7 @@ signals:
     void indexingStarted();
     void indexingProgress(qint64 filesProcessed);
     void contentIndexingCompleted(qint64 documentsIndexed, double elapsedMs);
+    void semanticIndexingCompleted(qint64 documentsEmbedded, qint64 chunksCreated, double elapsedMs);
     void indexingCompleted(const lumen::indexing::IndexingStatistics& stats);
     void incrementalUpdateApplied(int eventCount);
 

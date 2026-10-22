@@ -220,7 +220,7 @@ private slots:
         auto& db = lumen::database::DatabaseManager::instance();
         QVERIFY(db.initialize(lumen::core::AppPaths::databaseFilePath()));
         QVERIFY(db.clearAllFiles());
-        QCOMPARE(db.schemaVersion(), 2);
+        QVERIFY(db.schemaVersion() >= 2);
 
         lumen::indexing::FileIndexer indexer;
         QSignalSpy doneSpy(&indexer, &lumen::indexing::FileIndexer::indexingCompleted);

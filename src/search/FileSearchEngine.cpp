@@ -4,6 +4,7 @@
 #include "core/Logger.h"
 #include "database/DatabaseManager.h"
 #include "extraction/DocumentExtractor.h"
+#include "semantic/SemanticEmbeddingEngine.h"
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -328,7 +329,7 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
 
     // Pass 1: B-tree index prefix lookup on idx_files_name (handles 1-2 char queries AND guarantees exact/prefix hits)
     const QString firstToken = queryTokensLower.isEmpty() ? effectiveQueryLower : queryTokensLower.first();
-    if (!firstToken.isEmpty()) {
+    if (activeFilters.includeFilenameMatches && !firstToken.isEmpty()) {
         const QString upperBound = firstToken + QChar(0xFFFF);
         const char* prefixSql =
             "SELECT id, path, name, extension, size, mtime "
@@ -350,7 +351,7 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
     }
 
     // Pass 2: FTS5 trigram substring lookup for queries with >= 3 character token(s)
-    if (!ftsTrigTokens.isEmpty() &&
+    if (activeFilters.includeFilenameMatches && !ftsTrigTokens.isEmpty() &&
         (!cancellationToken || !cancellationToken->load(std::memory_order_relaxed))) {
         const QString matchExpr = ftsTrigTokens.join(QStringLiteral(" AND "));
         const char* ftsSql =
@@ -372,7 +373,7 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
     }
 
     // Pass 3: If user filtered strictly by extension (e.g. "ext:pdf") with no filename tokens
-    if (queryTokensLower.isEmpty() && !activeFilters.extensions.isEmpty() &&
+    if (activeFilters.includeFilenameMatches && queryTokensLower.isEmpty() && !activeFilters.extensions.isEmpty() &&
         (!cancellationToken || !cancellationToken->load(std::memory_order_relaxed))) {
         const QString extTarget = activeFilters.extensions.first();
         const char* extSql =
@@ -472,6 +473,111 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
         }
     }
 
+    // Pass 5: Offline Semantic Vector Search over document_chunks (when chunks exist in DB)
+    if (activeFilters.includeSemanticMatches && effectiveQueryLower.size() >= 3 &&
+        (!cancellationToken || !cancellationToken->load(std::memory_order_relaxed))) {
+        bool hasChunksInDb = false;
+        {
+            database::ScopedStmt checkChunksStmt;
+            if (sqlite3_prepare_v2(m_readDb, "SELECT 1 FROM document_chunks LIMIT 1;", -1, checkChunksStmt.receive(), nullptr) == SQLITE_OK &&
+                sqlite3_step(checkChunksStmt.get()) == SQLITE_ROW) {
+                hasChunksInDb = true;
+            }
+        }
+
+        if (hasChunksInDb) {
+            const std::vector<float> queryVec =
+                semantic::SemanticEmbeddingEngine::instance().embedText(effectiveQueryLower);
+            if (queryVec.size() == semantic::SemanticEmbeddingEngine::kEmbeddingDimension &&
+                (!cancellationToken || !cancellationToken->load(std::memory_order_relaxed))) {
+                const char* chunkSql =
+                    "SELECT ch.file_id, ch.page_number, ch.snippet_preview, ch.embedding, "
+                    "       f.path, f.name, f.extension, f.size, f.mtime "
+                    "FROM document_chunks ch "
+                    "JOIN files f ON f.id = ch.file_id;";
+                database::ScopedStmt chunkStmt;
+                if (sqlite3_prepare_v2(m_readDb, chunkSql, -1, chunkStmt.receive(), nullptr) == SQLITE_OK) {
+                    constexpr int kExpectedBlobBytes =
+                        semantic::SemanticEmbeddingEngine::kEmbeddingDimension * static_cast<int>(sizeof(float));
+
+                    while (sqlite3_step(chunkStmt.get()) == SQLITE_ROW) {
+                        const int blobBytes = sqlite3_column_bytes(chunkStmt.get(), 3);
+                        if (blobBytes != kExpectedBlobBytes) {
+                            continue;
+                        }
+                        const auto* chunkVec = reinterpret_cast<const float*>(sqlite3_column_blob(chunkStmt.get(), 3));
+                        const float sim = semantic::SemanticEmbeddingEngine::cosineSimilarity(
+                            queryVec.data(), chunkVec, semantic::SemanticEmbeddingEngine::kEmbeddingDimension);
+
+                        if (sim < activeFilters.minSemanticSimilarity) {
+                            continue;
+                        }
+
+                        const qint64 fileId = sqlite3_column_int64(chunkStmt.get(), 0);
+                        const int pageNum = sqlite3_column_int(chunkStmt.get(), 1);
+                        const char* rawPreview = reinterpret_cast<const char*>(sqlite3_column_text(chunkStmt.get(), 2));
+                        const QString previewText = rawPreview ? QString::fromUtf8(rawPreview) : QString();
+
+                        auto existingIt = candidateMap.find(fileId);
+                        if (existingIt != candidateMap.end()) {
+                            if (sim > existingIt->semanticSimilarity) {
+                                existingIt->semanticSimilarity = sim;
+                                if (existingIt->snippet.isEmpty()) {
+                                    existingIt->snippet = previewText;
+                                    existingIt->matchedPage = (pageNum > 1) ? pageNum : existingIt->matchedPage;
+                                }
+                            }
+                            if (existingIt->matchType != SearchResultMatchType::Semantic &&
+                                existingIt->matchType != SearchResultMatchType::Hybrid) {
+                                existingIt->matchType = SearchResultMatchType::Hybrid;
+                                existingIt->score += static_cast<double>(sim) * 130.0;
+                            } else if (existingIt->matchType == SearchResultMatchType::Semantic) {
+                                const double newSemScore = 160.0 + static_cast<double>(sim) * 220.0;
+                                if (newSemScore > existingIt->score) {
+                                    existingIt->score = newSemScore;
+                                    existingIt->snippet = previewText;
+                                    existingIt->matchedPage = (pageNum > 1) ? pageNum : 0;
+                                }
+                            }
+                            continue;
+                        }
+
+                        FileSearchResult item;
+                        item.id = fileId;
+                        const char* rawPath = reinterpret_cast<const char*>(sqlite3_column_text(chunkStmt.get(), 4));
+                        const char* rawName = reinterpret_cast<const char*>(sqlite3_column_text(chunkStmt.get(), 5));
+                        const char* rawExt = reinterpret_cast<const char*>(sqlite3_column_text(chunkStmt.get(), 6));
+                        item.size = sqlite3_column_int64(chunkStmt.get(), 7);
+                        item.mtime = sqlite3_column_int64(chunkStmt.get(), 8);
+
+                        item.path = rawPath ? QString::fromUtf8(rawPath) : QString();
+                        item.name = rawName ? QString::fromUtf8(rawName) : QString();
+                        item.extension = rawExt ? QString::fromUtf8(rawExt) : QString();
+                        item.parentDirectory = extractParentDir(item.path);
+
+                        if (!passesMetadataFilters(item, activeFilters)) {
+                            continue;
+                        }
+
+                        item.matchType = SearchResultMatchType::Semantic;
+                        item.snippet = previewText;
+                        item.matchedPage = (pageNum > 1) ? pageNum : 0;
+                        item.semanticSimilarity = sim;
+
+                        // Semantic-only score: ranks meaningfully alongside content hits without outranking exact filename matches
+                        double semScore = 160.0 + static_cast<double>(sim) * 220.0;
+                        if (item.mtime > 1577836800) {
+                            const double daysSince2020 = static_cast<double>(item.mtime - 1577836800) / 86400.0;
+                            semScore += std::clamp(daysSince2020 * 0.006, 0.0, 20.0);
+                        }
+                        item.score = semScore;
+                        candidateMap.insert(fileId, std::move(item));
+                    }
+                }
+            }
+        }
+    }
+
     sqlite3_progress_handler(m_readDb, 0, nullptr, nullptr);
 
     if (cancellationToken && cancellationToken->load(std::memory_order_relaxed)) {
@@ -506,6 +612,149 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
         *outElapsedMs = static_cast<double>(timer.nsecsElapsed()) / 1e6;
     }
     return finalResults;
+}
+
+QVector<FileSearchResult> FileSearchEngine::findRelatedDocuments(
+    qint64 sourceFileId,
+    int limit,
+    double* outElapsedMs) {
+    QElapsedTimer timer;
+    timer.start();
+
+    QVector<FileSearchResult> results;
+    if (sourceFileId <= 0 || limit <= 0) {
+        if (outElapsedMs) {
+            *outElapsedMs = 0.0;
+        }
+        return results;
+    }
+
+    QMutexLocker locker(&m_readMutex);
+    if (!ensureReadConnectionUnlocked()) {
+        return results;
+    }
+
+    constexpr int kDim = semantic::SemanticEmbeddingEngine::kEmbeddingDimension;
+    constexpr int kExpectedBlobBytes = kDim * static_cast<int>(sizeof(float));
+
+    // Compute L2-normalized centroid of the source document's chunks
+    std::vector<float> sourceCentroid(kDim, 0.0f);
+    int sourceChunkCount = 0;
+    {
+        database::ScopedStmt srcStmt;
+        if (sqlite3_prepare_v2(m_readDb,
+                               "SELECT embedding FROM document_chunks WHERE file_id = ?1;",
+                               -1,
+                               srcStmt.receive(),
+                               nullptr) == SQLITE_OK) {
+            sqlite3_bind_int64(srcStmt.get(), 1, sourceFileId);
+            while (sqlite3_step(srcStmt.get()) == SQLITE_ROW) {
+                if (sqlite3_column_bytes(srcStmt.get(), 0) != kExpectedBlobBytes) {
+                    continue;
+                }
+                const auto* vec = reinterpret_cast<const float*>(sqlite3_column_blob(srcStmt.get(), 0));
+                for (int d = 0; d < kDim; ++d) {
+                    sourceCentroid[static_cast<size_t>(d)] += vec[d];
+                }
+                ++sourceChunkCount;
+            }
+        }
+    }
+
+    if (sourceChunkCount == 0) {
+        if (outElapsedMs) {
+            *outElapsedMs = static_cast<double>(timer.nsecsElapsed()) / 1e6;
+        }
+        return results;
+    }
+
+    double normSq = 0.0;
+    for (float v : sourceCentroid) {
+        normSq += static_cast<double>(v) * static_cast<double>(v);
+    }
+    const float norm = static_cast<float>(std::sqrt(normSq));
+    if (norm > 1e-12f) {
+        for (float& v : sourceCentroid) {
+            v /= norm;
+        }
+    }
+
+    // Score all other documents in document_chunks
+    QHash<qint64, FileSearchResult> candidateMap;
+    {
+        const char* relSql =
+            "SELECT ch.file_id, ch.page_number, ch.snippet_preview, ch.embedding, "
+            "       f.path, f.name, f.extension, f.size, f.mtime "
+            "FROM document_chunks ch "
+            "JOIN files f ON f.id = ch.file_id "
+            "WHERE ch.file_id != ?1;";
+        database::ScopedStmt relStmt;
+        if (sqlite3_prepare_v2(m_readDb, relSql, -1, relStmt.receive(), nullptr) == SQLITE_OK) {
+            sqlite3_bind_int64(relStmt.get(), 1, sourceFileId);
+            while (sqlite3_step(relStmt.get()) == SQLITE_ROW) {
+                if (sqlite3_column_bytes(relStmt.get(), 3) != kExpectedBlobBytes) {
+                    continue;
+                }
+                const auto* vec = reinterpret_cast<const float*>(sqlite3_column_blob(relStmt.get(), 3));
+                const float sim = semantic::SemanticEmbeddingEngine::cosineSimilarity(
+                    sourceCentroid.data(), vec, kDim);
+                if (sim < 0.20f) {
+                    continue;
+                }
+
+                const qint64 fid = sqlite3_column_int64(relStmt.get(), 0);
+                const int pageNum = sqlite3_column_int(relStmt.get(), 1);
+                const char* rawPreview = reinterpret_cast<const char*>(sqlite3_column_text(relStmt.get(), 2));
+                const QString previewText = rawPreview ? QString::fromUtf8(rawPreview) : QString();
+
+                auto it = candidateMap.find(fid);
+                if (it != candidateMap.end()) {
+                    if (sim > it->semanticSimilarity) {
+                        it->semanticSimilarity = sim;
+                        it->score = static_cast<double>(sim) * 100.0;
+                        it->snippet = previewText;
+                        it->matchedPage = (pageNum > 1) ? pageNum : 0;
+                    }
+                    continue;
+                }
+
+                FileSearchResult item;
+                item.id = fid;
+                const char* rawPath = reinterpret_cast<const char*>(sqlite3_column_text(relStmt.get(), 4));
+                const char* rawName = reinterpret_cast<const char*>(sqlite3_column_text(relStmt.get(), 5));
+                const char* rawExt = reinterpret_cast<const char*>(sqlite3_column_text(relStmt.get(), 6));
+                item.size = sqlite3_column_int64(relStmt.get(), 7);
+                item.mtime = sqlite3_column_int64(relStmt.get(), 8);
+                item.path = rawPath ? QString::fromUtf8(rawPath) : QString();
+                item.name = rawName ? QString::fromUtf8(rawName) : QString();
+                item.extension = rawExt ? QString::fromUtf8(rawExt) : QString();
+                item.parentDirectory = extractParentDir(item.path);
+                item.matchType = SearchResultMatchType::Semantic;
+                item.snippet = previewText;
+                item.matchedPage = (pageNum > 1) ? pageNum : 0;
+                item.semanticSimilarity = sim;
+                item.score = static_cast<double>(sim) * 100.0;
+                candidateMap.insert(fid, std::move(item));
+            }
+        }
+    }
+
+    results.reserve(candidateMap.size());
+    for (auto it = candidateMap.begin(); it != candidateMap.end(); ++it) {
+        results.append(std::move(it.value()));
+    }
+
+    std::sort(results.begin(), results.end(), [](const FileSearchResult& a, const FileSearchResult& b) {
+        return a.score > b.score;
+    });
+    if (results.size() > limit) {
+        results.resize(limit);
+    }
+
+    if (outElapsedMs) {
+        *outElapsedMs = static_cast<double>(timer.nsecsElapsed()) / 1e6;
+    }
+    return results;
 }
 
 } // namespace lumen::search

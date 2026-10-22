@@ -4,6 +4,7 @@
 #include "core/SettingsManager.h"
 #include "platform/windows/DesktopIntegration.h"
 #include "platform/windows/SingleInstanceGuard.h"
+#include "semantic/SemanticEmbeddingEngine.h"
 #include "ui/BrandingIcon.h"
 #include "ui/SearchResults/SearchPopupWidget.h"
 
@@ -24,6 +25,7 @@
 #include <QScreen>
 #include <QShowEvent>
 #include <QStyleHints>
+#include <QTimer>
 #include <QUrl>
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -231,6 +233,12 @@ void DesktopSearchBar::collapsePopupAndDeactivate(bool clearQuery) {
     if (testAttribute(Qt::WA_WState_Created)) {
         const HWND hwnd = reinterpret_cast<HWND>(winId());
         platform::windows::DesktopIntegration::placeOnDesktopBottom(hwnd);
+    }
+
+    if (semantic::SemanticEmbeddingEngine::instance().isSessionLoaded()) {
+        QTimer::singleShot(180000, this, []() {
+            semantic::SemanticEmbeddingEngine::instance().checkAndUnloadIfIdle();
+        });
     }
     update();
 }

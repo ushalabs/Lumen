@@ -45,6 +45,22 @@ struct ContentExtractionCandidate {
     qint64 mtime = 0;
 };
 
+struct DocumentChunkRecord {
+    qint64 fileId = 0;
+    int chunkIndex = 0;
+    int pageNumber = 1;
+    qint64 mtime = 0;
+    QString snippetPreview;
+    QByteArray embeddingBlob; // 384 float32s (1,536 bytes)
+};
+
+struct SemanticExtractionCandidate {
+    qint64 fileId = 0;
+    qint64 mtime = 0;
+    QString bodyText;
+    QString pageOffsetsJson;
+};
+
 // RAII wrapper for sqlite3_stmt
 class ScopedStmt {
 public:
@@ -71,7 +87,7 @@ private:
 
 class DatabaseManager {
 public:
-    static constexpr int kCurrentSchemaVersion = 2;
+    static constexpr int kCurrentSchemaVersion = 3;
 
     static DatabaseManager& instance();
 
@@ -89,6 +105,8 @@ public:
     QStringList tableColumns(const QString& tableName) const;
     qint64 fileCount() const;
     qint64 documentContentCount() const;
+    qint64 documentChunkCount() const;
+    qint64 semanticEmbeddedFileCount() const;
 
     // Phase 1 writer and reconciliation operations (single-writer serialized via m_writeMutex)
     QHash<QString, ExistingFileMeta> queryExistingFilesUnderRoot(const QString& rootDirectory) const;
@@ -114,6 +132,14 @@ public:
                                     const std::atomic_bool* cancelFlag = nullptr);
     bool upsertDocumentContent(const DocumentContentRecord& record);
     bool optimizeDocumentFtsIndex();
+
+    // Phase 3 Semantic Chunk Indexing operations
+    QVector<SemanticExtractionCandidate> queryCandidatesForSemanticIndexing(
+        int maxTotalSemanticFiles = 2000) const;
+
+    bool replaceDocumentChunksBatch(const QVector<qint64>& fileIdsToClear,
+                                    const QVector<DocumentChunkRecord>& records,
+                                    const std::atomic_bool* cancelFlag = nullptr);
 
     bool updateCheckpoint(const QString& rootPath,
                           qint64 lastUsn,

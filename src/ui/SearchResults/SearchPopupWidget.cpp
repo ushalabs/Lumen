@@ -129,7 +129,13 @@ struct SnippetSegment {
     bool highlighted = false;
 };
 
-QVector<SnippetSegment> parseSnippetSegments(const QString& rawSnippet) {
+QVector<SnippetSegment> parseSnippetSegments(const QString& rawInput) {
+    QString rawSnippet = rawInput;
+    rawSnippet.replace(QStringLiteral("\r\n"), QStringLiteral(" "));
+    rawSnippet.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    rawSnippet.replace(QLatin1Char('\r'), QLatin1Char(' '));
+    rawSnippet = rawSnippet.simplified();
+
     QVector<SnippetSegment> segments;
     int pos = 0;
     const int n = rawSnippet.size();
@@ -302,9 +308,23 @@ public:
 
         int rightReservedWidth = sizeWidth + 6;
         if (matchType != search::SearchResultMatchType::Filename || matchedPage > 0) {
-            const QString pillLabel = (matchedPage > 0)
-                                          ? QStringLiteral("Page %1").arg(matchedPage)
-                                          : QStringLiteral("Content");
+            const bool isSemantic = (matchType == search::SearchResultMatchType::Semantic ||
+                                     matchType == search::SearchResultMatchType::Hybrid);
+            QString pillLabel;
+            if (matchType == search::SearchResultMatchType::Semantic) {
+                pillLabel = (matchedPage > 0)
+                                ? QStringLiteral("Page %1 · Semantic").arg(matchedPage)
+                                : QStringLiteral("Semantic");
+            } else if (matchType == search::SearchResultMatchType::Hybrid) {
+                pillLabel = (matchedPage > 0)
+                                ? QStringLiteral("Page %1 · Hybrid").arg(matchedPage)
+                                : QStringLiteral("Hybrid");
+            } else {
+                pillLabel = (matchedPage > 0)
+                                ? QStringLiteral("Page %1").arg(matchedPage)
+                                : QStringLiteral("Content");
+            }
+
             QFont pillFont(QStringLiteral("Segoe UI"), 7, QFont::DemiBold);
             const QFontMetrics fmPill(pillFont);
             const int pillW = fmPill.horizontalAdvance(pillLabel) + 12;
@@ -313,10 +333,18 @@ public:
                                   pillW,
                                   16.0);
             painter->setPen(Qt::NoPen);
-            painter->setBrush(m_darkTheme ? QColor(16, 185, 129, 45) : QColor(209, 250, 229));
+            if (isSemantic) {
+                painter->setBrush(m_darkTheme ? QColor(139, 92, 246, 55) : QColor(237, 233, 254));
+            } else {
+                painter->setBrush(m_darkTheme ? QColor(16, 185, 129, 45) : QColor(209, 250, 229));
+            }
             painter->drawRoundedRect(pillRect, 4.0, 4.0);
             painter->setFont(pillFont);
-            painter->setPen(m_darkTheme ? QColor(110, 231, 183) : QColor(4, 120, 87));
+            if (isSemantic) {
+                painter->setPen(m_darkTheme ? QColor(196, 181, 253) : QColor(109, 40, 217));
+            } else {
+                painter->setPen(m_darkTheme ? QColor(110, 231, 183) : QColor(4, 120, 87));
+            }
             painter->drawText(pillRect, Qt::AlignCenter, pillLabel);
             rightReservedWidth += pillW + 6;
         }

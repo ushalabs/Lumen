@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(Lumen
-    VERSION 0.3.0
+    VERSION 0.4.0
     DESCRIPTION "Lumen — Lightweight Offline Intelligent Search for Windows"
     HOMEPAGE_URL "https://ushalabs.com"
     LANGUAGES C CXX RC
@@ -49,7 +49,7 @@ if(MSVC)
 endif()
 
 # ------------------------------------------------------------------------------
-# Lumen Core, Indexing, Extraction, Search & UI Static Library
+# Lumen Core, Indexing, Extraction, Semantic, Search & UI Static Library
 # ------------------------------------------------------------------------------
 set(LUMEN_LIB_SOURCES
     src/core/AppPaths.h
@@ -64,6 +64,12 @@ set(LUMEN_LIB_SOURCES
     src/extraction/DeflateCodec.cpp
     src/extraction/DocumentExtractor.h
     src/extraction/DocumentExtractor.cpp
+    src/semantic/WordPieceTokenizer.h
+    src/semantic/WordPieceTokenizer.cpp
+    src/semantic/DocumentChunker.h
+    src/semantic/DocumentChunker.cpp
+    src/semantic/SemanticEmbeddingEngine.h
+    src/semantic/SemanticEmbeddingEngine.cpp
     src/indexing/DirectoryWatcher.h
     src/indexing/DirectoryWatcher.cpp
     src/indexing/FileIndexer.h
@@ -92,6 +98,7 @@ add_library(lumen_lib STATIC ${LUMEN_LIB_SOURCES})
 
 target_include_directories(lumen_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime/include
 )
 
 target_link_libraries(lumen_lib PUBLIC
@@ -125,7 +132,7 @@ if(MSVC)
 endif()
 
 # ------------------------------------------------------------------------------
-# Automated Phase 0, Phase 1 & Phase 2 Test Suites + Benchmarks
+# Automated Phase 0, Phase 1, Phase 2 & Phase 3 Test Suites + Benchmarks
 # ------------------------------------------------------------------------------
 enable_testing()
 
@@ -156,6 +163,15 @@ target_link_libraries(phase2_tests PRIVATE
 )
 add_test(NAME Phase2Tests COMMAND phase2_tests)
 
+add_executable(phase3_tests
+    tests/phase3_tests.cpp
+)
+target_link_libraries(phase3_tests PRIVATE
+    lumen_lib
+    Qt6::Test
+)
+add_test(NAME Phase3Tests COMMAND phase3_tests)
+
 add_executable(phase1_benchmark
     benchmarks/phase1_benchmark.cpp
 )
@@ -167,5 +183,12 @@ add_executable(phase2_benchmark
     benchmarks/phase2_benchmark.cpp
 )
 target_link_libraries(phase2_benchmark PRIVATE
+    lumen_lib
+)
+
+add_executable(phase3_benchmark
+    benchmarks/phase3_benchmark.cpp
+)
+target_link_libraries(phase3_benchmark PRIVATE
     lumen_lib
 )

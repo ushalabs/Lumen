@@ -2,6 +2,7 @@
 #include "database/DatabaseManager.h"
 #include "platform/windows/DesktopIntegration.h"
 #include "platform/windows/SingleInstanceGuard.h"
+#include "semantic/SemanticEmbeddingEngine.h"
 #include "ui/BrandingIcon.h"
 #include "ui/DesktopSearchBar/DesktopSearchBar.h"
 #include "ui/SearchResults/SearchPopupWidget.h"
@@ -33,7 +34,7 @@ int main(int argc, char* argv[]) {
     QApplication::setOrganizationDomain(QStringLiteral("ushalabs.com"));
     QApplication::setApplicationName(QStringLiteral("Lumen"));
     QApplication::setApplicationDisplayName(QStringLiteral("Lumen"));
-    QApplication::setApplicationVersion(QStringLiteral("0.3.0"));
+    QApplication::setApplicationVersion(QStringLiteral("0.4.0"));
     QApplication::setQuitOnLastWindowClosed(false);
     QApplication::setWindowIcon(lumen::ui::BrandingIcon::createAppIcon());
 
@@ -88,7 +89,7 @@ int main(int argc, char* argv[]) {
                 QCoreApplication::processEvents();
                 bar->grab().save(dir.filePath(QStringLiteral("phase0_desktop_bar_idle.png")));
 
-                // Ensure sample records exist to render Phase 1 & Phase 2 live search results screenshots
+                // Ensure sample records exist to render Phase 1, Phase 2 & Phase 3 live search results screenshots
                 auto& db = lumen::database::DatabaseManager::instance();
                 db.clearAllFiles();
                 const qint64 now = QDateTime::currentSecsSinceEpoch();
@@ -115,34 +116,68 @@ int main(int argc, char* argv[]) {
                         rec.bodyText = QStringLiteral("Strategic Forecast: Enterprise licensing retention reached 97.2% across all global regions during fiscal year 2026.");
                     } else {
                         rec.pageCount = 1;
-                        rec.bodyText = QStringLiteral("Incident Postmortem: Zero data loss verified; enterprise licensing portal recovered within 4 minutes.");
+                        rec.bodyText = QStringLiteral("Incident Postmortem: Database server outage resolved with zero data loss; primary cluster recovered within 4 minutes.");
                     }
                     rec.charCount = static_cast<int>(rec.bodyText.size());
                     docContents.push_back(std::move(rec));
                 }
                 db.upsertDocumentContentBatch(docContents);
 
+                // Generate real semantic embeddings for the sample documents
+                const auto semCandidates = db.queryCandidatesForSemanticIndexing(10);
+                QVector<qint64> fileIdsToClear;
+                QVector<lumen::database::DocumentChunkRecord> chunkRecords;
+                for (const auto& sc : semCandidates) {
+                    const auto emb = lumen::semantic::SemanticEmbeddingEngine::instance().embedText(sc.bodyText);
+                    if (!emb.empty()) {
+                        fileIdsToClear.push_back(sc.fileId);
+                        lumen::database::DocumentChunkRecord ch;
+                        ch.fileId = sc.fileId;
+                        ch.chunkIndex = 0;
+                        ch.pageNumber = (sc.pageOffsetsJson.isEmpty()) ? 1 : 2;
+                        ch.mtime = sc.mtime;
+                        QString cleanPreview = sc.bodyText;
+                        cleanPreview.replace(QStringLiteral("\n\n"), QStringLiteral(" — "));
+                        cleanPreview.replace(QLatin1Char('\n'), QLatin1Char(' '));
+                        ch.snippetPreview = cleanPreview.left(180);
+                        ch.embeddingBlob = QByteArray(reinterpret_cast<const char*>(emb.data()),
+                                                      static_cast<int>(emb.size() * sizeof(float)));
+                        chunkRecords.push_back(std::move(ch));
+                    }
+                }
+                if (!chunkRecords.isEmpty()) {
+                    db.replaceDocumentChunksBatch(fileIdsToClear, chunkRecords);
+                }
+
                 bar->activateAndFocusSearch();
                 bar->setSearchText(QStringLiteral("report"));
 
-                QTimer::singleShot(150, &qApp[0], [bar, dir]() {
+                QTimer::singleShot(180, &qApp[0], [bar, dir]() {
                     QCoreApplication::processEvents();
                     bar->grab().save(dir.filePath(QStringLiteral("phase1_desktop_search_results.png")));
 
                     bar->setSearchText(QStringLiteral("enterprise licensing"));
-                    QTimer::singleShot(150, &qApp[0], [bar, dir]() {
+                    QTimer::singleShot(180, &qApp[0], [bar, dir]() {
                         QCoreApplication::processEvents();
                         bar->grab().save(dir.filePath(QStringLiteral("phase2_content_search_results.png")));
-                        bar->collapsePopupAndDeactivate(true);
 
-                        lumen::ui::SettingsDialog settingsDlg;
-                        settingsDlg.show();
-                        QCoreApplication::processEvents();
-                        settingsDlg.grab().save(dir.filePath(QStringLiteral("phase0_settings_dialog.png")));
-                        settingsDlg.hide();
+                        // Natural-language semantic query with zero exact keyword overlap
+                        bar->setSearchText(QStringLiteral("company financial earnings growth"));
+                        QTimer::singleShot(250, &qApp[0], [bar, dir]() {
+                            QCoreApplication::processEvents();
+                            bar->grab().save(dir.filePath(QStringLiteral("phase3_semantic_search_results.png")));
+                            bar->collapsePopupAndDeactivate(true);
 
-                        lumen::database::DatabaseManager::instance().clearAllFiles();
-                        QCoreApplication::quit();
+                            lumen::ui::SettingsDialog settingsDlg;
+                            settingsDlg.show();
+                            QCoreApplication::processEvents();
+                            settingsDlg.grab().save(dir.filePath(QStringLiteral("phase0_settings_dialog.png")));
+                            settingsDlg.hide();
+
+                            lumen::semantic::SemanticEmbeddingEngine::instance().unloadModel();
+                            lumen::database::DatabaseManager::instance().clearAllFiles();
+                            QCoreApplication::quit();
+                        });
                     });
                 });
             } else {

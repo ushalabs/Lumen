@@ -3,6 +3,9 @@
 #include "core/Logger.h"
 #include "database/DatabaseManager.h"
 #include "extraction/DocumentExtractor.h"
+#include "platform/windows/DesktopIntegration.h"
+#include "semantic/DocumentChunker.h"
+#include "semantic/SemanticEmbeddingEngine.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -115,7 +118,8 @@ void FileIndexer::startBackgroundIndexing(const QStringList& watchedRoots,
                                           const QStringList& ignoredDirNames,
                                           bool extractContent,
                                           int maxContentFiles,
-                                          qint64 maxDocumentBytes) {
+                                          qint64 maxDocumentBytes,
+                                          bool enableSemanticIndexing) {
     stop();
 
     m_ignoredLower.clear();
@@ -127,7 +131,7 @@ void FileIndexer::startBackgroundIndexing(const QStringList& watchedRoots,
     m_watcher.startWatching(watchedRoots, ignoredDirNames);
 
     m_workerThread = std::thread(
-        [this, watchedRoots, ignoredDirNames, extractContent, maxContentFiles, maxDocumentBytes]() {
+        [this, watchedRoots, ignoredDirNames, extractContent, maxContentFiles, maxDocumentBytes, enableSemanticIndexing]() {
             applyLowPriorityThreadPolicy();
             emit indexingStarted();
 
@@ -138,6 +142,16 @@ void FileIndexer::startBackgroundIndexing(const QStringList& watchedRoots,
                     maxContentFiles, maxDocumentBytes, &contentMs);
                 stats.contentExtractionMs = contentMs;
                 emit contentIndexingCompleted(stats.documentsContentIndexed, contentMs);
+            }
+
+            if (!m_cancelRequested.load(std::memory_order_relaxed) && enableSemanticIndexing) {
+                double semMs = 0.0;
+                qint64 chunksCount = 0;
+                stats.documentsSemanticIndexed = runSemanticIndexingPass(
+                    kDefaultMaxSemanticFiles, &semMs, &chunksCount);
+                stats.semanticChunksCreated = chunksCount;
+                stats.semanticIndexingMs = semMs;
+                emit semanticIndexingCompleted(stats.documentsSemanticIndexed, chunksCount, semMs);
             }
 
             if (!m_cancelRequested.load(std::memory_order_relaxed)) {
@@ -479,6 +493,143 @@ qint64 FileIndexer::runContentExtractionPass(int maxContentFiles,
             .arg(candidates.size()));
 
     return indexedCount;
+}
+
+qint64 FileIndexer::runSemanticIndexingPass(int maxSemanticFiles,
+                                            double* outElapsedMs,
+                                            qint64* outChunksCreated) {
+    QElapsedTimer timer;
+    timer.start();
+
+    if (outChunksCreated) {
+        *outChunksCreated = 0;
+    }
+
+    auto& db = database::DatabaseManager::instance();
+    const QVector<database::SemanticExtractionCandidate> candidates =
+        db.queryCandidatesForSemanticIndexing(maxSemanticFiles);
+
+    if (candidates.isEmpty()) {
+        if (outElapsedMs) {
+            *outElapsedMs = static_cast<double>(timer.nsecsElapsed()) / 1e6;
+        }
+        return 0;
+    }
+
+    auto& engine = semantic::SemanticEmbeddingEngine::instance();
+    if (!engine.isModelAvailable()) {
+        if (outElapsedMs) {
+            *outElapsedMs = static_cast<double>(timer.nsecsElapsed()) / 1e6;
+        }
+        return 0;
+    }
+
+    m_scanning.store(true, std::memory_order_release);
+
+    qint64 embeddedDocs = 0;
+    qint64 totalChunks = 0;
+    QVector<qint64> pendingFileIds;
+    QVector<database::DocumentChunkRecord> pendingChunks;
+    pendingFileIds.reserve(kSemanticBatchSize);
+    pendingChunks.reserve(kSemanticBatchSize * 4);
+
+    constexpr quint64 kWorkingSetThrottleBytes = 320ULL * 1024ULL * 1024ULL; // 320 MB adaptive cap
+
+    for (int i = 0; i < candidates.size(); ++i) {
+        if (m_cancelRequested.load(std::memory_order_relaxed)) {
+            break;
+        }
+        while (m_paused.load(std::memory_order_relaxed) && !m_cancelRequested.load(std::memory_order_relaxed)) {
+            Sleep(150);
+        }
+        if ((i & 0x07) == 0) {
+            if (isPowerConstrained()) {
+                Sleep(30);
+            }
+            const auto metrics = platform::windows::DesktopIntegration::queryCurrentProcessMetrics();
+            if (metrics.workingSetBytes > kWorkingSetThrottleBytes) {
+                ::SetProcessWorkingSetSizeEx(::GetCurrentProcess(),
+                                             static_cast<SIZE_T>(-1),
+                                             static_cast<SIZE_T>(-1),
+                                             0);
+                Sleep(15);
+            }
+        }
+
+        const auto& cand = candidates.at(i);
+        const QVector<semantic::DocumentChunk> chunks =
+            semantic::DocumentChunker::chunkDocumentText(cand.bodyText, cand.pageOffsetsJson);
+
+        if (chunks.isEmpty()) {
+            continue;
+        }
+
+        bool docSuccess = false;
+        for (const semantic::DocumentChunk& chunk : chunks) {
+            if (m_cancelRequested.load(std::memory_order_relaxed)) {
+                break;
+            }
+            const std::vector<float> vec = engine.embedText(chunk.chunkText);
+            if (vec.size() != semantic::SemanticEmbeddingEngine::kEmbeddingDimension) {
+                continue;
+            }
+
+            database::DocumentChunkRecord rec;
+            rec.fileId = cand.fileId;
+            rec.chunkIndex = chunk.chunkIndex;
+            rec.pageNumber = chunk.pageNumber;
+            rec.mtime = cand.mtime;
+            rec.snippetPreview = chunk.snippetPreview;
+            rec.embeddingBlob = QByteArray(reinterpret_cast<const char*>(vec.data()),
+                                           static_cast<qsizetype>(vec.size() * sizeof(float)));
+            pendingChunks.append(std::move(rec));
+            docSuccess = true;
+        }
+
+        if (docSuccess) {
+            pendingFileIds.append(cand.fileId);
+        }
+
+        if (pendingFileIds.size() >= kSemanticBatchSize) {
+            if (db.replaceDocumentChunksBatch(pendingFileIds, pendingChunks, &m_cancelRequested)) {
+                embeddedDocs += pendingFileIds.size();
+                totalChunks += pendingChunks.size();
+            }
+            pendingFileIds.clear();
+            pendingChunks.clear();
+        }
+    }
+
+    if (!pendingFileIds.isEmpty() && !m_cancelRequested.load(std::memory_order_relaxed)) {
+        if (db.replaceDocumentChunksBatch(pendingFileIds, pendingChunks, &m_cancelRequested)) {
+            embeddedDocs += pendingFileIds.size();
+            totalChunks += pendingChunks.size();
+        }
+        pendingFileIds.clear();
+        pendingChunks.clear();
+    }
+
+    // Immediately unload the ONNX inference session after background indexing finishes
+    engine.unloadModel();
+    db.walCheckpointTruncate();
+
+    const double elapsedMs = static_cast<double>(timer.nsecsElapsed()) / 1e6;
+    if (outElapsedMs) {
+        *outElapsedMs = elapsedMs;
+    }
+    if (outChunksCreated) {
+        *outChunksCreated = totalChunks;
+    }
+    m_scanning.store(false, std::memory_order_release);
+
+    core::Logger::info(
+        QStringLiteral("Indexer"),
+        QStringLiteral("Semantic indexing pass complete in %1 ms (embedded %2 docs, %3 chunks).")
+            .arg(elapsedMs, 0, 'f', 2)
+            .arg(embeddedDocs)
+            .arg(totalChunks));
+
+    return embeddedDocs;
 }
 
 void FileIndexer::applyIncrementalChanges(const QVector<FileChangeEvent>& events,

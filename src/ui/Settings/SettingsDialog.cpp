@@ -109,9 +109,10 @@ void SettingsDialog::loadFromSettings() {
 
     auto& db = database::DatabaseManager::instance();
     m_dbStatusLabel->setText(
-        QStringLiteral("Indexed Files: %1  •  Content Documents: %2  •  DB: %3 (Schema v%4, WAL: %5)")
+        QStringLiteral("Indexed Files: %1  •  Content Docs: %2  •  Semantic Chunks: %3\nDB: %4 (Schema v%5, WAL: %6)")
             .arg(db.fileCount())
             .arg(db.documentContentCount())
+            .arg(db.documentChunkCount())
             .arg(core::AppPaths::databaseFilePath())
             .arg(db.schemaVersion())
             .arg(db.journalMode()));

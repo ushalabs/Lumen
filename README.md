@@ -10,6 +10,7 @@
 [![Language](https://img.shields.io/badge/Language-C%2B%2B20-00599C?style=flat-square&logo=cplusplus)](https://isocpp.org/)
 [![UI](https://img.shields.io/badge/UI-Qt%206%20Widgets%20%2B%20Win32-41CD52?style=flat-square&logo=qt)](https://www.qt.io/)
 [![Database](https://img.shields.io/badge/Database-SQLite%203%20(WAL%20%2B%20FTS5)-003B57?style=flat-square&logo=sqlite)](https://www.sqlite.org/)
+[![AI](https://img.shields.io/badge/AI-ONNX%20Runtime%20CPU%20(MiniLM%20INT8)-8B5CF6?style=flat-square)](https://onnxruntime.ai/)
 [![Privacy](https://img.shields.io/badge/Privacy-100%25%20Offline-10B981?style=flat-square)](https://github.com/ushalabs/Lumen)
 
 **Developed by [UshaLabs](https://github.com/ushalabs)**
@@ -27,7 +28,8 @@
 
 - **Zero Cloud Dependencies:** No accounts, no telemetry, no external APIs, and no network traffic at runtime.
 - **Native Desktop Integration:** A persistent, compact desktop search widget (`400 × 50` px) positioned in the upper-right desktop work area—plus a global keyboard shortcut (`Ctrl+Alt+Space`) from any running application.
-- **Exceptional Resource Efficiency:** Consumes **~0.01% idle CPU** and **~27–30 MB Working Set RAM** (`~5.6 MB` private memory), with **~34 ms warm startup**.
+- **On-Demand Offline AI:** Bundled INT8-quantized `all-MiniLM-L6-v2` (384-D) model via dynamically loaded ONNX Runtime CPU (`LoadLibraryW` + `ORT_API_MANUAL_INIT`). Never loaded at startup; automatically unloaded after background indexing or search inactivity to reclaim working set pages.
+- **Exceptional Resource Efficiency:** Consumes **~0.01% idle CPU** and **~27–30 MB Working Set RAM** (`~5.5 MB` private memory), with **~34–87 ms startup**.
 
 ---
 
@@ -41,6 +43,9 @@
 
 ### Full-Text Document Content Search (`PDF` Page Number + Highlighted Snippets)
 ![Lumen Document Content Search Results — Phase 2](docs/screenshots/phase2_content_search_results.png)
+
+### Offline Semantic Search (Zero-Keyword-Overlap Natural Language Discovery)
+![Lumen Offline Semantic Search Results — Phase 3](docs/screenshots/phase3_semantic_search_results.png)
 
 ### Native On-Demand Settings Dialog
 ![Lumen Settings Dialog](docs/screenshots/phase0_settings_dialog.png)
@@ -63,14 +68,15 @@ flowchart LR
         Watcher["DirectoryWatcher\n(ReadDirectoryChangesW OVERLAPPED)"]
     end
 
-    subgraph Engine["Indexing, Extraction & Search Engine"]
+    subgraph Engine["Indexing, Extraction, Semantic & Search Engine"]
         Indexer["FileIndexer\n(FindFirstFileExW + EcoQoS Throttling)"]
         Extract["DocumentExtractor + DeflateCodec\n(.txt, .md, .docx, .pdf)"]
-        Search["FileSearchEngine\n(Cancellable Read-Only Connection)"]
+        Sem["SemanticEmbeddingEngine + WordPieceTokenizer\n(Lazy LoadLibraryW ONNX CPU + all-MiniLM-L6-v2 INT8)"]
+        Search["FileSearchEngine\n(Hybrid Lexical + FTS5 + 384-D Cosine Vector Search)"]
     end
 
     subgraph Storage["Embedded Storage (%LOCALAPPDATA%\\UshaLabs\\Lumen)"]
-        DB[("SQLite 3.47 WAL (Schema v2)\nfiles + files_fts (Trigram)\ndocument_content + document_fts (BM25)")]
+        DB[("SQLite 3.47 WAL (Schema v3)\nfiles + files_fts (Trigram)\ndocument_content + document_fts (BM25)\ndocument_chunks (384-D float32 BLOBs)")]
         Cfg["settings.json &\nRotating Logs (1 MB cap)"]
     end
 
@@ -79,8 +85,10 @@ flowchart LR
     WinInt --> Bar
     Watcher --> Indexer
     Indexer --> Extract
+    Indexer --> Sem
     Extract --> DB
-    Indexer --> DB
+    Sem --> DB
+    Search --> Sem
     Search --> DB
     Tray --> Cfg
 ```
@@ -94,8 +102,8 @@ flowchart LR
 | **Phase 0** | **Native Foundation + Desktop Search Bar** | **Completed & Verified** | Native `WIN32` C++20/Qt6 executable, upper-right desktop search bar, Win32 `HWND_BOTTOM` + `Win+D` integration, `RegisterHotKey`, single-instance mutex, system tray, SQLite WAL + FTS5 schema, rotating logger |
 | **Phase 1** | **Ultrafast Filename Indexing** | **Completed & Verified** | `FindFirstFileExW` background enumeration, `ReadDirectoryChangesW` real-time watcher, 5,000-row batch SQLite reconciliation, B-tree prefix + FTS5 trigram search engine, relevance ranking, virtualized results UI |
 | **Phase 2** | **Document Content Search** | **Completed & Verified** | Zero-external-dependency native extractors for `.txt`, `.md`, `.docx` (ZIP + WordprocessingML), and multi-page `.pdf` (`/FlateDecode` + `BT...ET` parser + page offsets), RFC 1951/1950 Deflate with 16 MB ZIP-bomb cap, FTS5 `unicode61` BM25 content search, highlighted snippets & PDF page badges |
-| **Phase 3** | **Offline Semantic Search** | **In Progress** | Lazy-loaded ONNX Runtime CPU inference (`all-MiniLM-L6-v2` quantized), document chunking, embedded vector search, hybrid lexical + semantic ranking |
-| **Phase 4** | **Complete Desktop UX** | Planned | Search modes (`All`, `Files`, `Content`, `Semantic`), quick file preview, context menu actions, `Find Related Documents`, light/dark/system themes |
+| **Phase 3** | **Offline Semantic Search** | **Completed & Verified** | Lazy-loaded ONNX Runtime CPU inference (`all-MiniLM-L6-v2` INT8 quantized, 384-D), native BERT WordPiece tokenizer, 350-word overlapping document chunker, SQLite `document_chunks` vector store, hybrid lexical + semantic ranking, `findRelatedDocuments`, automatic memory unloading (`_heapmin` + `SetProcessWorkingSetSizeEx`) |
+| **Phase 4** | **Complete Desktop UX** | **In Progress** | Search modes (`All`, `Files`, `Content`, `Semantic`), quick file preview, context menu actions, `Find Related Documents`, light/dark/system themes |
 | **Phase 5** | **Production Hardening + Microsoft Store** | Planned | Integrity recovery, full settings suite, standalone Windows installer + MSIX package, full benchmark suite |
 
 ---
@@ -116,8 +124,7 @@ flowchart LR
 | **Warm Startup to Visible Desktop Bar** | `< 500 ms` | **`33.83 ms` avg** (`32.79 ms` – `36.41 ms` warm; `51.44 ms` cold) | **PASSED** (~14× faster) |
 | **Idle CPU (2-Minute Controlled Test)** | `< 0.1%` avg | **`0.0179%` avg** (`171.88 ms` CPU time across `120.06 s`) | **PASSED** (>5.5× under budget) |
 | **Idle Working Set RAM (Desktop Bar Visible)** | `< 120 MB` (`< 70 MB` stretch) | **`30.44 MB`** (`5.58 MB` Private Bytes) | **PASSED** (Beats stretch goal) |
-| **Standalone `Lumen.exe` Binary Size** | Compact | **`1.42 MB`** (statically embeds SQLite 3.47.2 + FTS5 + native extractors) | **VERIFIED** |
-| **Complete Deployed Bundle Size** | Compact | **`23.96 MB`** (`Lumen.exe` + Qt6 Core/Gui/Widgets DLLs) | **VERIFIED** |
+| **Standalone `Lumen.exe` Binary Size** | Compact | **`1.45 MB`** (statically embeds SQLite 3.47.2 + FTS5 + native extractors + WordPiece) | **VERIFIED** |
 
 ### Phase 1 — 100,000-File Indexing & Search Benchmarks (`phase1_benchmark.exe`)
 
@@ -147,6 +154,18 @@ flowchart LR
 | **Content Index Storage Growth** | Compact | **`0.98 MB`** (`1.00 KB / document` including FTS5 inverted index) | **PASSED** |
 | **Full-Text Search Working Set RAM** | `< 250 MB` | **`18.14 MB` Working Set** (`5.52 MB` Private Bytes) | **PASSED** (>13× under budget) |
 
+### Phase 3 — Offline Semantic Search & ONNX Runtime CPU Benchmarks (`phase3_benchmark.exe`)
+
+| Operation / Metric | Engineering Target | Measured Result (`all-MiniLM-L6-v2` INT8 Quantized, 384-D, CPU Only) | Status |
+|---|---|---|---|
+| **Lazy ONNX Model Load + First Inference** | On-demand only | **`236.68 ms`** (`onnxruntime.dll` dynamically loaded via `LoadLibraryW`) | **PASSED** |
+| **Embedding Generation Throughput (CPU)** | Fast background | **`127.2 chunks/sec`** (**`7.86 ms / chunk`**, `1,965.73 ms` for 250 documents) | **PASSED** |
+| **Semantic Search Latency — P50 (Median)** | Fast | **`4.16 ms`** (query embedding + 384-D cosine similarity scan + hybrid rank) | **PASSED** |
+| **Semantic Search Latency — P95** | `< 150 ms` | **`5.88 ms`** (Max: `11.21 ms` across 40 natural-language queries) | **PASSED** (>25× faster) |
+| **Vector Index Storage Growth** | Compact | **`500.00 KB`** for 250 chunks (`2,048 bytes / chunk` including metadata & preview) | **PASSED** |
+| **Peak RAM During Semantic Indexing** | `< 350 MB` | **`61.42 MB` Working Set** (with disabled CPU arena & adaptive throttling) | **PASSED** (5.7× under budget) |
+| **Working Set RAM After `unloadModel()`** | Reclaimed to OS | **`0.25 MB` Working Set** (`17.15 MB` Private; `28.68 MB` full GUI idle) | **PASSED** |
+
 ---
 
 ## Repository Structure
@@ -159,25 +178,30 @@ Lumen/
 ├── assets/
 │   ├── app.rc                      # Native Win32 VERSIONINFO & icon resource
 │   ├── branding/lumen_logo.svg     # UshaLabs Lumen vector emblem
-│   └── icons/lumen.ico             # Multi-resolution Windows icon
+│   ├── icons/lumen.ico             # Multi-resolution Windows icon
+│   └── models/all-MiniLM-L6-v2/    # Bundled offline INT8 ONNX model (21.9 MB) & vocab.txt
 ├── src/
 │   ├── main.cpp                    # Entry point, single-instance check, CLI harness
 │   ├── app/                        # LumenApplication & TrayController
 │   ├── core/                       # AppPaths, rotating Logger, SettingsManager
-│   ├── database/                   # DatabaseManager (SQLite3 WAL + FTS5 Schema v2)
+│   ├── database/                   # DatabaseManager (SQLite3 WAL + FTS5 Schema v3)
 │   ├── extraction/                 # DocumentExtractor (.txt/.md/.docx/.pdf) & DeflateCodec
-│   ├── indexing/                   # FileIndexer (FindFirstFileExW + content pass) & DirectoryWatcher
-│   ├── search/                     # FileSearchEngine (B-tree + FTS5 trigram + BM25 content + snippets)
+│   ├── semantic/                   # SemanticEmbeddingEngine (ONNX CPU), WordPieceTokenizer, DocumentChunker
+│   ├── indexing/                   # FileIndexer (metadata + content + semantic passes) & DirectoryWatcher
+│   ├── search/                     # FileSearchEngine (Hybrid lexical + FTS5 + 384-D cosine vector search)
 │   ├── platform/windows/           # DesktopIntegration & SingleInstanceGuard
 │   └── ui/                         # DesktopSearchBar, SearchPopupWidget, SettingsDialog
 ├── tests/
 │   ├── phase0_tests.cpp            # Phase 0 automated QtTest suite (10 tests)
 │   ├── phase1_tests.cpp            # Phase 1 automated QtTest suite (7 tests)
-│   └── phase2_tests.cpp            # Phase 2 automated QtTest suite (7 tests)
+│   ├── phase2_tests.cpp            # Phase 2 automated QtTest suite (7 tests)
+│   └── phase3_tests.cpp            # Phase 3 automated QtTest suite (6 tests)
 ├── benchmarks/
 │   ├── phase1_benchmark.cpp        # Reproducible 100,000-file NTFS filename benchmark
-│   └── phase2_benchmark.cpp        # Reproducible 1,000-document content & FTS5 benchmark
+│   ├── phase2_benchmark.cpp        # Reproducible 1,000-document content & FTS5 benchmark
+│   └── phase3_benchmark.cpp        # Reproducible 250-document ONNX CPU semantic benchmark
 ├── third_party/
+│   ├── onnxruntime/                # ONNX Runtime v1.20.1 Windows x64 C/C++ headers & CPU runtime
 │   └── sqlite3/                    # Bundled SQLite 3.47.2 amalgamation
 └── docs/
     └── screenshots/                # Verified native application screenshots
@@ -201,19 +225,20 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/Q
 cmake --build build --config Release
 ```
 
-### 2. Run Automated Tests (24 Tests across Phases 0, 1, and 2)
+### 2. Run Automated Tests (30 Tests across Phases 0, 1, 2, and 3)
 
 ```powershell
 $env:PATH = "C:\Qt\6.8.2\msvc2022_64\bin;$env:PATH"
 ctest --test-dir build --output-on-failure -V
 ```
 
-### 3. Run the Phase 1 & Phase 2 Benchmarks
+### 3. Run the Phase 1, Phase 2 & Phase 3 Benchmarks
 
 ```powershell
 $env:PATH = "C:\Qt\6.8.2\msvc2022_64\bin;$env:PATH"
 .\build\phase1_benchmark.exe
 .\build\phase2_benchmark.exe
+.\build\phase3_benchmark.exe
 ```
 
 ### 4. Deploy Standalone Release Bundle
@@ -221,6 +246,7 @@ $env:PATH = "C:\Qt\6.8.2\msvc2022_64\bin;$env:PATH"
 ```powershell
 New-Item -ItemType Directory -Force -Path build\deploy | Out-Null
 Copy-Item build\Lumen.exe build\deploy\Lumen.exe -Force
+Copy-Item third_party\onnxruntime\lib\*.dll build\deploy\ -Force
 C:\Qt\6.8.2\msvc2022_64\bin\windeployqt.exe --release --no-translations --no-opengl-sw --no-system-d3d-compiler --no-network build\deploy\Lumen.exe
 .\build\deploy\Lumen.exe
 ```

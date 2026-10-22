@@ -14,7 +14,9 @@ namespace lumen::search {
 enum class SearchResultMatchType {
     Filename = 0,
     Content = 1,
-    FilenameAndContent = 2
+    FilenameAndContent = 2,
+    Semantic = 3,
+    Hybrid = 4
 };
 
 struct SearchFilters {
@@ -23,7 +25,10 @@ struct SearchFilters {
     qint64 minSizeBytes = -1;
     qint64 maxSizeBytes = -1;
     qint64 modifiedAfterEpoch = -1;
+    bool includeFilenameMatches = true;
     bool includeContentMatches = true;
+    bool includeSemanticMatches = true;
+    float minSemanticSimilarity = 0.28f;
 };
 
 struct FileSearchResult {
@@ -38,10 +43,11 @@ struct FileSearchResult {
     int matchStart = -1;
     int matchLength = 0;
 
-    // Phase 2 Document Content fields
+    // Phase 2 & Phase 3 Document Content / Semantic fields
     SearchResultMatchType matchType = SearchResultMatchType::Filename;
-    QString snippet;     // Passage snippet with «term» highlight markers
-    int matchedPage = 0; // 1-based page number when matched inside a multi-page PDF/DOCX
+    QString snippet;                 // Passage snippet with «term» highlight markers or semantic chunk preview
+    int matchedPage = 0;             // 1-based page number when matched inside a multi-page PDF/DOCX
+    float semanticSimilarity = 0.0f; // Cosine similarity in [0, 1] when matched semantically
 };
 
 class FileSearchEngine {
@@ -54,12 +60,18 @@ public:
 
     void setDatabasePath(const QString& dbFilePath);
 
-    // Executes a fast, cancellable search over both indexed filenames and full-text document content.
+    // Executes a fast, cancellable hybrid search over filenames, full-text content, and semantic embeddings.
     QVector<FileSearchResult> searchFiles(
         const QString& query,
         const SearchFilters& filters = SearchFilters{},
         int limit = 50,
         const std::shared_ptr<std::atomic_bool>& cancellationToken = nullptr,
+        double* outElapsedMs = nullptr);
+
+    // Finds documents semantically related to a given indexed file ID using chunk vector similarity.
+    QVector<FileSearchResult> findRelatedDocuments(
+        qint64 sourceFileId,
+        int limit = 10,
         double* outElapsedMs = nullptr);
 
     static double computeFilenameScore(const QString& fileName,
