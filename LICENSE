@@ -1,0 +1,8 @@
+Copyright (c) 2026 UshaLabs. All rights reserved.
+
+Lumen — Lightweight Offline Intelligent Search for Windows
+Developed by UshaLabs.
+
+Third-Party Notices:
+- Qt 6 Toolkit: Dynamically linked under the GNU Lesser General Public License v3 (LGPLv3).
+- SQLite 3: Public Domain (https://www.sqlite.org/copyright.html).
