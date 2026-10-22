@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QMutexLocker>
 
+#include <algorithm>
 #include <sqlite3.h>
 
 namespace lumen::database {
@@ -138,7 +139,7 @@ bool DatabaseManager::applyPragmasUnlocked() {
         "PRAGMA foreign_keys = ON;"
         "PRAGMA temp_store = MEMORY;"
         "PRAGMA mmap_size = 0;"
-        "PRAGMA cache_size = -4096;"; // Capped 4 MB page cache for idle efficiency
+        "PRAGMA cache_size = -4096;";
     return executeSqlUnlocked(pragmaSql);
 }
 
@@ -179,7 +180,7 @@ bool DatabaseManager::applyMigrationsUnlocked() {
         return false;
     }
 
-    const int currentVersion = querySchemaVersionUnlocked();
+    int currentVersion = querySchemaVersionUnlocked();
     if (currentVersion >= kCurrentSchemaVersion) {
         return true;
     }
@@ -243,9 +244,75 @@ bool DatabaseManager::applyMigrationsUnlocked() {
         sqlite3_bind_text(insertVerStmt.get(), 3, "Phase 0 initial metadata and filename FTS5 schema", -1, SQLITE_STATIC);
 
         if (sqlite3_step(insertVerStmt.get()) != SQLITE_DONE) {
+            stmt_fail_v1:
+            insertVerStmt.reset();
             executeSqlUnlocked("ROLLBACK;");
             return false;
         }
+        insertVerStmt.reset();
+
+        if (!executeSqlUnlocked("COMMIT;")) {
+            goto stmt_fail_v1;
+        }
+        currentVersion = 1;
+    }
+
+    if (currentVersion < 2) {
+        const char* migrationV2Sql =
+            "BEGIN IMMEDIATE TRANSACTION;"
+            "CREATE TABLE IF NOT EXISTS document_content ("
+            "    file_id INTEGER PRIMARY KEY NOT NULL REFERENCES files(id) ON DELETE CASCADE,"
+            "    mtime INTEGER NOT NULL DEFAULT 0,"
+            "    page_count INTEGER NOT NULL DEFAULT 1,"
+            "    char_count INTEGER NOT NULL DEFAULT 0,"
+            "    body_text TEXT NOT NULL DEFAULT '',"
+            "    page_offsets_json TEXT NOT NULL DEFAULT ''"
+            ");"
+            "CREATE VIRTUAL TABLE IF NOT EXISTS document_fts USING fts5("
+            "    body_text,"
+            "    content='document_content',"
+            "    content_rowid='file_id',"
+            "    tokenize='unicode61 remove_diacritics 2'"
+            ");"
+            "CREATE TRIGGER IF NOT EXISTS trg_doc_content_ai AFTER INSERT ON document_content BEGIN "
+            "    INSERT INTO document_fts(rowid, body_text) VALUES (new.file_id, new.body_text); "
+            "END;"
+            "CREATE TRIGGER IF NOT EXISTS trg_doc_content_ad AFTER DELETE ON document_content BEGIN "
+            "    INSERT INTO document_fts(document_fts, rowid, body_text) VALUES ('delete', old.file_id, old.body_text); "
+            "END;"
+            "CREATE TRIGGER IF NOT EXISTS trg_doc_content_au AFTER UPDATE ON document_content BEGIN "
+            "    INSERT INTO document_fts(document_fts, rowid, body_text) VALUES ('delete', old.file_id, old.body_text); "
+            "    INSERT INTO document_fts(rowid, body_text) VALUES (new.file_id, new.body_text); "
+            "END;";
+
+        if (!executeSqlUnlocked(migrationV2Sql)) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+
+        ScopedStmt insertVerStmt;
+        const char* insertVerSql =
+            "INSERT INTO schema_migrations(version, applied_at, description) VALUES (?1, ?2, ?3);";
+        if (sqlite3_prepare_v2(m_db, insertVerSql, -1, insertVerStmt.receive(), nullptr) != SQLITE_OK) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+
+        const qint64 nowEpoch = QDateTime::currentSecsSinceEpoch();
+        sqlite3_bind_int(insertVerStmt.get(), 1, 2);
+        sqlite3_bind_int64(insertVerStmt.get(), 2, nowEpoch);
+        sqlite3_bind_text(insertVerStmt.get(),
+                          3,
+                          "Phase 2 document_content and external-content document_fts schema",
+                          -1,
+                          SQLITE_STATIC);
+
+        if (sqlite3_step(insertVerStmt.get()) != SQLITE_DONE) {
+            insertVerStmt.reset();
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+        insertVerStmt.reset();
 
         if (!executeSqlUnlocked("COMMIT;")) {
             executeSqlUnlocked("ROLLBACK;");
@@ -349,6 +416,21 @@ qint64 DatabaseManager::fileCount() const {
     return 0;
 }
 
+qint64 DatabaseManager::documentContentCount() const {
+    QMutexLocker locker(&m_writeMutex);
+    if (m_db == nullptr) {
+        return 0;
+    }
+    ScopedStmt stmt;
+    if (sqlite3_prepare_v2(m_db, "SELECT COUNT(*) FROM document_content;", -1, stmt.receive(), nullptr) != SQLITE_OK) {
+        return 0;
+    }
+    if (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+        return sqlite3_column_int64(stmt.get(), 0);
+    }
+    return 0;
+}
+
 QHash<QString, ExistingFileMeta> DatabaseManager::queryExistingFilesUnderRoot(const QString& rootDirectory) const {
     QMutexLocker locker(&m_writeMutex);
     QHash<QString, ExistingFileMeta> result;
@@ -361,8 +443,6 @@ QHash<QString, ExistingFileMeta> DatabaseManager::queryExistingFilesUnderRoot(co
         normalizedRoot.append(QLatin1Char('\\'));
     }
 
-    // Use range scan on the UNIQUE path index: path >= 'C:\root\' AND path < 'C:\root]'
-    // ('\\' is ASCII 92, ']' is ASCII 93)
     QString upperBound = normalizedRoot;
     upperBound[upperBound.size() - 1] = QLatin1Char(']');
 
@@ -518,7 +598,6 @@ bool DatabaseManager::removeFileByPath(const QString& path) {
     const QString cleanNative = QDir::toNativeSeparators(QDir::cleanPath(path));
     const QByteArray exactUtf8 = cleanNative.toUtf8();
 
-    // Delete either exact file match or directory subtree if path was a directory
     QString dirPrefix = cleanNative;
     if (!dirPrefix.endsWith(QLatin1Char('\\'))) {
         dirPrefix.append(QLatin1Char('\\'));
@@ -558,7 +637,6 @@ bool DatabaseManager::renamePath(const QString& oldPath,
         return false;
     }
 
-    // 1. Update exact file match
     {
         ScopedStmt stmt;
         const char* sql =
@@ -584,7 +662,6 @@ bool DatabaseManager::renamePath(const QString& oldPath,
         }
     }
 
-    // 2. If a directory was renamed, also update child paths under oldNative + '\'
     QString oldDirPrefix = oldNative;
     if (!oldDirPrefix.endsWith(QLatin1Char('\\'))) {
         oldDirPrefix.append(QLatin1Char('\\'));
@@ -604,7 +681,7 @@ bool DatabaseManager::renamePath(const QString& oldPath,
             const QByteArray newPrefixUtf8 = newDirPrefix.toUtf8();
             const QByteArray lowerUtf8 = oldDirPrefix.toUtf8();
             const QByteArray upperUtf8 = oldDirUpper.toUtf8();
-            const int substrStart = oldDirPrefix.size() + 1; // SQLite SUBSTR is 1-indexed in characters
+            const int substrStart = oldDirPrefix.size() + 1;
 
             sqlite3_bind_text(dirStmt.get(), 1, newPrefixUtf8.constData(), newPrefixUtf8.size(), SQLITE_STATIC);
             sqlite3_bind_int(dirStmt.get(), 2, substrStart);
@@ -628,11 +705,157 @@ bool DatabaseManager::clearAllFiles() {
     }
     const char* sql =
         "BEGIN IMMEDIATE TRANSACTION;"
+        "DELETE FROM document_content;"
         "DELETE FROM files;"
         "DELETE FROM indexing_checkpoints;"
         "INSERT INTO files_fts(files_fts) VALUES('rebuild');"
+        "INSERT INTO document_fts(document_fts) VALUES('rebuild');"
         "COMMIT;";
     return executeSqlUnlocked(sql);
+}
+
+QVector<ContentExtractionCandidate> DatabaseManager::queryCandidatesForContentExtraction(
+    int maxTotalContentFiles,
+    qint64 maxFileSizeBytes) const {
+    QMutexLocker locker(&m_writeMutex);
+    QVector<ContentExtractionCandidate> candidates;
+    if (m_db == nullptr || maxTotalContentFiles <= 0) {
+        return candidates;
+    }
+
+    // Count how many valid up-to-date documents are already content-indexed
+    int existingValidCount = 0;
+    {
+        ScopedStmt countStmt;
+        const char* countSql =
+            "SELECT COUNT(*) FROM document_content dc "
+            "JOIN files f ON f.id = dc.file_id "
+            "WHERE dc.mtime = f.mtime;";
+        if (sqlite3_prepare_v2(m_db, countSql, -1, countStmt.receive(), nullptr) == SQLITE_OK &&
+            sqlite3_step(countStmt.get()) == SQLITE_ROW) {
+            existingValidCount = sqlite3_column_int(countStmt.get(), 0);
+        }
+    }
+
+    const int remainingBudget = std::max(0, maxTotalContentFiles - existingValidCount);
+    if (remainingBudget == 0) {
+        return candidates;
+    }
+
+    const char* sql =
+        "SELECT f.id, f.path, f.extension, f.size, f.mtime "
+        "FROM files f "
+        "LEFT JOIN document_content dc ON dc.file_id = f.id "
+        "WHERE f.extension IN ('txt', 'md', 'pdf', 'docx') COLLATE NOCASE "
+        "  AND f.size > 0 "
+        "  AND f.size <= ?1 "
+        "  AND (dc.file_id IS NULL OR dc.mtime != f.mtime) "
+        "ORDER BY f.mtime DESC "
+        "LIMIT ?2;";
+
+    ScopedStmt stmt;
+    if (sqlite3_prepare_v2(m_db, sql, -1, stmt.receive(), nullptr) != SQLITE_OK) {
+        return candidates;
+    }
+
+    sqlite3_bind_int64(stmt.get(), 1, maxFileSizeBytes);
+    sqlite3_bind_int(stmt.get(), 2, remainingBudget);
+
+    while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+        ContentExtractionCandidate cand;
+        cand.fileId = sqlite3_column_int64(stmt.get(), 0);
+        const char* rawPath = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 1));
+        const char* rawExt = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 2));
+        cand.size = sqlite3_column_int64(stmt.get(), 3);
+        cand.mtime = sqlite3_column_int64(stmt.get(), 4);
+        cand.path = rawPath ? QString::fromUtf8(rawPath) : QString();
+        cand.extension = rawExt ? QString::fromUtf8(rawExt).toLower() : QString();
+        candidates.append(std::move(cand));
+    }
+    return candidates;
+}
+
+bool DatabaseManager::upsertDocumentContentBatch(const QVector<DocumentContentRecord>& records,
+                                                 const std::atomic_bool* cancelFlag) {
+    if (records.isEmpty()) {
+        return true;
+    }
+
+    QMutexLocker locker(&m_writeMutex);
+    if (m_db == nullptr) {
+        return false;
+    }
+
+    if (!executeSqlUnlocked("BEGIN IMMEDIATE TRANSACTION;")) {
+        return false;
+    }
+
+    const char* sql =
+        "INSERT INTO document_content(file_id, mtime, page_count, char_count, body_text, page_offsets_json) "
+        "VALUES (?1, ?2, ?3, ?4, ?5, ?6) "
+        "ON CONFLICT(file_id) DO UPDATE SET "
+        "    mtime = excluded.mtime,"
+        "    page_count = excluded.page_count,"
+        "    char_count = excluded.char_count,"
+        "    body_text = excluded.body_text,"
+        "    page_offsets_json = excluded.page_offsets_json "
+        "WHERE document_content.mtime != excluded.mtime "
+        "   OR document_content.char_count != excluded.char_count;";
+
+    ScopedStmt stmt;
+    if (sqlite3_prepare_v2(m_db, sql, -1, stmt.receive(), nullptr) != SQLITE_OK) {
+        executeSqlUnlocked("ROLLBACK;");
+        return false;
+    }
+
+    for (const DocumentContentRecord& rec : records) {
+        if (cancelFlag != nullptr && cancelFlag->load(std::memory_order_relaxed)) {
+            stmt.reset();
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+
+        const QByteArray bodyUtf8 = rec.bodyText.toUtf8();
+        const QByteArray offsetsUtf8 = rec.pageOffsetsJson.toUtf8();
+
+        sqlite3_bind_int64(stmt.get(), 1, rec.fileId);
+        sqlite3_bind_int64(stmt.get(), 2, rec.mtime);
+        sqlite3_bind_int(stmt.get(), 3, rec.pageCount);
+        sqlite3_bind_int(stmt.get(), 4, rec.charCount);
+        sqlite3_bind_text(stmt.get(), 5, bodyUtf8.constData(), bodyUtf8.size(), SQLITE_STATIC);
+        sqlite3_bind_text(stmt.get(), 6, offsetsUtf8.constData(), offsetsUtf8.size(), SQLITE_STATIC);
+
+        const int rc = sqlite3_step(stmt.get());
+        sqlite3_reset(stmt.get());
+        sqlite3_clear_bindings(stmt.get());
+
+        if (rc != SQLITE_DONE) {
+            stmt.reset();
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+    }
+
+    stmt.reset();
+    if (!executeSqlUnlocked("COMMIT;")) {
+        executeSqlUnlocked("ROLLBACK;");
+        return false;
+    }
+    return true;
+}
+
+bool DatabaseManager::upsertDocumentContent(const DocumentContentRecord& record) {
+    QVector<DocumentContentRecord> batch;
+    batch.append(record);
+    return upsertDocumentContentBatch(batch, nullptr);
+}
+
+bool DatabaseManager::optimizeDocumentFtsIndex() {
+    QMutexLocker locker(&m_writeMutex);
+    if (m_db == nullptr) {
+        return false;
+    }
+    return executeSqlUnlocked("INSERT INTO document_fts(document_fts) VALUES('optimize');");
 }
 
 bool DatabaseManager::updateCheckpoint(const QString& rootPath,

@@ -11,12 +11,19 @@ struct sqlite3;
 
 namespace lumen::search {
 
+enum class SearchResultMatchType {
+    Filename = 0,
+    Content = 1,
+    FilenameAndContent = 2
+};
+
 struct SearchFilters {
     QStringList extensions;     // Optional extension filter (e.g. {"pdf", "docx"})
     QString pathPrefix;         // Optional folder scope filter
     qint64 minSizeBytes = -1;
     qint64 maxSizeBytes = -1;
     qint64 modifiedAfterEpoch = -1;
+    bool includeContentMatches = true;
 };
 
 struct FileSearchResult {
@@ -30,6 +37,11 @@ struct FileSearchResult {
     double score = 0.0;
     int matchStart = -1;
     int matchLength = 0;
+
+    // Phase 2 Document Content fields
+    SearchResultMatchType matchType = SearchResultMatchType::Filename;
+    QString snippet;     // Passage snippet with «term» highlight markers
+    int matchedPage = 0; // 1-based page number when matched inside a multi-page PDF/DOCX
 };
 
 class FileSearchEngine {
@@ -42,8 +54,7 @@ public:
 
     void setDatabasePath(const QString& dbFilePath);
 
-    // Primary Phase 1 Search API:
-    // Executes a fast, cancellable filename search over indexed metadata + FTS5 trigram index.
+    // Executes a fast, cancellable search over both indexed filenames and full-text document content.
     QVector<FileSearchResult> searchFiles(
         const QString& query,
         const SearchFilters& filters = SearchFilters{},
@@ -51,7 +62,6 @@ public:
         const std::shared_ptr<std::atomic_bool>& cancellationToken = nullptr,
         double* outElapsedMs = nullptr);
 
-    // Computes relevance score for a candidate filename against a normalized query.
     static double computeFilenameScore(const QString& fileName,
                                        const QString& extension,
                                        qint64 mtime,

@@ -3,12 +3,14 @@
 #include "core/AppPaths.h"
 #include "core/Logger.h"
 #include "database/DatabaseManager.h"
+#include "extraction/DocumentExtractor.h"
 
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QHash>
 #include <QMutexLocker>
+#include <QRegularExpression>
 
 #include <algorithm>
 #include <cmath>
@@ -67,6 +69,17 @@ bool isWordBoundaryChar(QChar c) {
     return c == QLatin1Char('_') || c == QLatin1Char('-') ||
            c == QLatin1Char(' ') || c == QLatin1Char('.') ||
            c == QLatin1Char('(') || c == QLatin1Char('[');
+}
+
+QString sanitizeFtsWordToken(const QString& rawToken) {
+    QString clean;
+    clean.reserve(rawToken.size());
+    for (QChar ch : rawToken) {
+        if (ch.isLetterOrNumber() || ch == QLatin1Char('_')) {
+            clean.append(ch);
+        }
+    }
+    return clean;
 }
 } // namespace
 
@@ -228,6 +241,7 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
     SearchFilters activeFilters = filters;
     QStringList queryTokensLower;
     QStringList ftsTrigTokens;
+    QStringList ftsDocTokens;
 
     const QStringList rawParts = trimmedQuery.split(QLatin1Char(' '), Qt::SkipEmptyParts);
     for (const QString& part : rawParts) {
@@ -247,6 +261,10 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
             QString escaped = lowerPart;
             escaped.replace(QLatin1Char('"'), QStringLiteral("\"\""));
             ftsTrigTokens.append(QStringLiteral("\"%1\"").arg(escaped));
+        }
+        const QString cleanWord = sanitizeFtsWordToken(lowerPart);
+        if (cleanWord.size() >= 2) {
+            ftsDocTokens.append(QStringLiteral("\"%1\"*").arg(cleanWord));
         }
     }
 
@@ -271,6 +289,7 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
     QHash<qint64, FileSearchResult> candidateMap;
     const int prefixFetchLimit = std::max(limit * 3, 150);
     const int ftsFetchLimit = std::max(limit * 8, 400);
+    const int docFtsFetchLimit = std::max(limit * 4, 160);
 
     auto collectRow = [&](sqlite3_stmt* stmt) {
         const qint64 id = sqlite3_column_int64(stmt, 0);
@@ -302,6 +321,7 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
             item.score = score;
             item.matchStart = matchStart;
             item.matchLength = matchLen;
+            item.matchType = SearchResultMatchType::Filename;
             candidateMap.insert(id, std::move(item));
         }
     };
@@ -368,6 +388,86 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
 
             while (sqlite3_step(extStmt.get()) == SQLITE_ROW) {
                 collectRow(extStmt.get());
+            }
+        }
+    }
+
+    // Pass 4: Full-text document content search via document_fts (unicode61 + BM25 + snippet + page number)
+    if (activeFilters.includeContentMatches && !ftsDocTokens.isEmpty() &&
+        (!cancellationToken || !cancellationToken->load(std::memory_order_relaxed))) {
+        const QString docMatchExpr = ftsDocTokens.join(QStringLiteral(" AND "));
+        const QString firstSearchTerm = sanitizeFtsWordToken(firstToken);
+        const char* docSql =
+            "SELECT f.id, f.path, f.name, f.extension, f.size, f.mtime, "
+            "       snippet(document_fts, 0, '«', '»', ' … ', 9) AS snip, "
+            "       bm25(document_fts) AS rank_score, "
+            "       dc.page_offsets_json, "
+            "       CASE WHEN dc.page_offsets_json != '' THEN INSTR(LOWER(dc.body_text), ?2) ELSE 0 END AS match_pos "
+            "FROM document_fts "
+            "JOIN document_content dc ON dc.file_id = document_fts.rowid "
+            "JOIN files f ON f.id = document_fts.rowid "
+            "WHERE document_fts MATCH ?1 "
+            "LIMIT ?3;";
+        database::ScopedStmt docStmt;
+        if (sqlite3_prepare_v2(m_readDb, docSql, -1, docStmt.receive(), nullptr) == SQLITE_OK) {
+            const QByteArray docMatchUtf8 = docMatchExpr.toUtf8();
+            const QByteArray firstTermUtf8 = firstSearchTerm.toUtf8();
+            sqlite3_bind_text(docStmt.get(), 1, docMatchUtf8.constData(), docMatchUtf8.size(), SQLITE_STATIC);
+            sqlite3_bind_text(docStmt.get(), 2, firstTermUtf8.constData(), firstTermUtf8.size(), SQLITE_STATIC);
+            sqlite3_bind_int(docStmt.get(), 3, docFtsFetchLimit);
+
+            while (sqlite3_step(docStmt.get()) == SQLITE_ROW) {
+                const qint64 id = sqlite3_column_int64(docStmt.get(), 0);
+                const char* rawSnip = reinterpret_cast<const char*>(sqlite3_column_text(docStmt.get(), 6));
+                const double bm25Val = sqlite3_column_double(docStmt.get(), 7);
+                const char* rawPageJson = reinterpret_cast<const char*>(sqlite3_column_text(docStmt.get(), 8));
+                const int matchPos1Based = sqlite3_column_int(docStmt.get(), 9);
+
+                const QString snippetText = rawSnip ? QString::fromUtf8(rawSnip).simplified() : QString();
+                const QString pageOffsetsJson = rawPageJson ? QString::fromUtf8(rawPageJson) : QString();
+                int matchedPage = 0;
+                if (!pageOffsetsJson.isEmpty()) {
+                    const int zeroBasedPos = std::max(0, matchPos1Based - 1);
+                    matchedPage = extraction::DocumentExtractor::resolvePageForCharOffset(pageOffsetsJson, zeroBasedPos);
+                }
+
+                auto existingIt = candidateMap.find(id);
+                if (existingIt != candidateMap.end()) {
+                    existingIt->snippet = snippetText;
+                    existingIt->matchedPage = matchedPage;
+                    existingIt->matchType = SearchResultMatchType::FilenameAndContent;
+                    existingIt->score += 140.0 + std::clamp(-bm25Val * 12.0, 0.0, 120.0);
+                    continue;
+                }
+
+                FileSearchResult item;
+                item.id = id;
+                const char* rawPath = reinterpret_cast<const char*>(sqlite3_column_text(docStmt.get(), 1));
+                const char* rawName = reinterpret_cast<const char*>(sqlite3_column_text(docStmt.get(), 2));
+                const char* rawExt = reinterpret_cast<const char*>(sqlite3_column_text(docStmt.get(), 3));
+                item.size = sqlite3_column_int64(docStmt.get(), 4);
+                item.mtime = sqlite3_column_int64(docStmt.get(), 5);
+
+                item.path = rawPath ? QString::fromUtf8(rawPath) : QString();
+                item.name = rawName ? QString::fromUtf8(rawName) : QString();
+                item.extension = rawExt ? QString::fromUtf8(rawExt) : QString();
+                item.parentDirectory = extractParentDir(item.path);
+
+                if (!passesMetadataFilters(item, activeFilters)) {
+                    continue;
+                }
+
+                item.snippet = snippetText;
+                item.matchedPage = matchedPage;
+                item.matchType = SearchResultMatchType::Content;
+
+                double contentScore = 240.0 + std::clamp(-bm25Val * 18.0, 0.0, 180.0);
+                if (item.mtime > 1577836800) {
+                    const double daysSince2020 = static_cast<double>(item.mtime - 1577836800) / 86400.0;
+                    contentScore += std::clamp(daysSince2020 * 0.008, 0.0, 25.0);
+                }
+                item.score = contentScore;
+                candidateMap.insert(id, std::move(item));
             }
         }
     }

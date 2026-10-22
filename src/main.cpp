@@ -33,7 +33,7 @@ int main(int argc, char* argv[]) {
     QApplication::setOrganizationDomain(QStringLiteral("ushalabs.com"));
     QApplication::setApplicationName(QStringLiteral("Lumen"));
     QApplication::setApplicationDisplayName(QStringLiteral("Lumen"));
-    QApplication::setApplicationVersion(QStringLiteral("0.2.0"));
+    QApplication::setApplicationVersion(QStringLiteral("0.3.0"));
     QApplication::setQuitOnLastWindowClosed(false);
     QApplication::setWindowIcon(lumen::ui::BrandingIcon::createAppIcon());
 
@@ -88,8 +88,9 @@ int main(int argc, char* argv[]) {
                 QCoreApplication::processEvents();
                 bar->grab().save(dir.filePath(QStringLiteral("phase0_desktop_bar_idle.png")));
 
-                // Ensure sample records exist to render Phase 1 live search results screenshot
+                // Ensure sample records exist to render Phase 1 & Phase 2 live search results screenshots
                 auto& db = lumen::database::DatabaseManager::instance();
+                db.clearAllFiles();
                 const qint64 now = QDateTime::currentSecsSinceEpoch();
                 QVector<lumen::database::FileRecord> sampleRecords = {
                     {0, QStringLiteral("C:\\Users\\HP\\Documents\\Finance\\quarterly_report_2026_q3.pdf"), QStringLiteral("quarterly_report_2026_q3.pdf"), QStringLiteral("pdf"), 1482910, now - 3600, 1},
@@ -99,22 +100,50 @@ int main(int argc, char* argv[]) {
                 };
                 db.upsertFileBatch(sampleRecords);
 
+                const auto candidates = db.queryCandidatesForContentExtraction(10, 10LL * 1024LL * 1024LL);
+                QVector<lumen::database::DocumentContentRecord> docContents;
+                for (const auto& c : candidates) {
+                    lumen::database::DocumentContentRecord rec;
+                    rec.fileId = c.fileId;
+                    rec.mtime = c.mtime;
+                    if (c.extension == QStringLiteral("pdf")) {
+                        rec.pageCount = 2;
+                        rec.bodyText = QStringLiteral("Executive Summary\n\nConsolidated Q3 revenue increased by 28.4% year-over-year driven by enterprise licensing and offline desktop adoption.");
+                        rec.pageOffsetsJson = QStringLiteral("[{\"p\":1,\"o\":0},{\"p\":2,\"o\":19}]");
+                    } else if (c.extension == QStringLiteral("docx")) {
+                        rec.pageCount = 1;
+                        rec.bodyText = QStringLiteral("Strategic Forecast: Enterprise licensing retention reached 97.2% across all global regions during fiscal year 2026.");
+                    } else {
+                        rec.pageCount = 1;
+                        rec.bodyText = QStringLiteral("Incident Postmortem: Zero data loss verified; enterprise licensing portal recovered within 4 minutes.");
+                    }
+                    rec.charCount = static_cast<int>(rec.bodyText.size());
+                    docContents.push_back(std::move(rec));
+                }
+                db.upsertDocumentContentBatch(docContents);
+
                 bar->activateAndFocusSearch();
                 bar->setSearchText(QStringLiteral("report"));
 
                 QTimer::singleShot(150, &qApp[0], [bar, dir]() {
                     QCoreApplication::processEvents();
                     bar->grab().save(dir.filePath(QStringLiteral("phase1_desktop_search_results.png")));
-                    bar->collapsePopupAndDeactivate(true);
 
-                    lumen::ui::SettingsDialog settingsDlg;
-                    settingsDlg.show();
-                    QCoreApplication::processEvents();
-                    settingsDlg.grab().save(dir.filePath(QStringLiteral("phase0_settings_dialog.png")));
-                    settingsDlg.hide();
+                    bar->setSearchText(QStringLiteral("enterprise licensing"));
+                    QTimer::singleShot(150, &qApp[0], [bar, dir]() {
+                        QCoreApplication::processEvents();
+                        bar->grab().save(dir.filePath(QStringLiteral("phase2_content_search_results.png")));
+                        bar->collapsePopupAndDeactivate(true);
 
-                    lumen::database::DatabaseManager::instance().clearAllFiles();
-                    QCoreApplication::quit();
+                        lumen::ui::SettingsDialog settingsDlg;
+                        settingsDlg.show();
+                        QCoreApplication::processEvents();
+                        settingsDlg.grab().save(dir.filePath(QStringLiteral("phase0_settings_dialog.png")));
+                        settingsDlg.hide();
+
+                        lumen::database::DatabaseManager::instance().clearAllFiles();
+                        QCoreApplication::quit();
+                    });
                 });
             } else {
                 QCoreApplication::quit();

@@ -2,6 +2,7 @@
 
 #include "core/Logger.h"
 #include "database/DatabaseManager.h"
+#include "extraction/DocumentExtractor.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -111,7 +112,10 @@ FileIndexer::~FileIndexer() {
 }
 
 void FileIndexer::startBackgroundIndexing(const QStringList& watchedRoots,
-                                          const QStringList& ignoredDirNames) {
+                                          const QStringList& ignoredDirNames,
+                                          bool extractContent,
+                                          int maxContentFiles,
+                                          qint64 maxDocumentBytes) {
     stop();
 
     m_ignoredLower.clear();
@@ -122,14 +126,24 @@ void FileIndexer::startBackgroundIndexing(const QStringList& watchedRoots,
     m_cancelRequested.store(false, std::memory_order_release);
     m_watcher.startWatching(watchedRoots, ignoredDirNames);
 
-    m_workerThread = std::thread([this, watchedRoots, ignoredDirNames]() {
-        applyLowPriorityThreadPolicy();
-        emit indexingStarted();
-        const IndexingStatistics stats = runScanAndReconcile(watchedRoots, ignoredDirNames);
-        if (!m_cancelRequested.load(std::memory_order_relaxed)) {
-            emit indexingCompleted(stats);
-        }
-    });
+    m_workerThread = std::thread(
+        [this, watchedRoots, ignoredDirNames, extractContent, maxContentFiles, maxDocumentBytes]() {
+            applyLowPriorityThreadPolicy();
+            emit indexingStarted();
+
+            IndexingStatistics stats = runScanAndReconcile(watchedRoots, ignoredDirNames);
+            if (!m_cancelRequested.load(std::memory_order_relaxed) && extractContent) {
+                double contentMs = 0.0;
+                stats.documentsContentIndexed = runContentExtractionPass(
+                    maxContentFiles, maxDocumentBytes, &contentMs);
+                stats.contentExtractionMs = contentMs;
+                emit contentIndexingCompleted(stats.documentsContentIndexed, contentMs);
+            }
+
+            if (!m_cancelRequested.load(std::memory_order_relaxed)) {
+                emit indexingCompleted(stats);
+            }
+        });
 }
 
 void FileIndexer::stop() {
@@ -150,12 +164,10 @@ bool FileIndexer::isPowerConstrained() {
     if (!GetSystemPowerStatus(&sps)) {
         return false;
     }
-    // ACLineStatus == 0 means running on battery power
     if (sps.ACLineStatus == 0) {
         if (sps.BatteryLifePercent != 255 && sps.BatteryLifePercent < 20) {
             return true;
         }
-        // SystemStatusFlag == 1 indicates Windows Battery Saver is active
         if (sps.SystemStatusFlag == 1) {
             return true;
         }
@@ -240,7 +252,6 @@ IndexingStatistics FileIndexer::runScanAndReconcile(const QStringList& watchedRo
 
         db.updateCheckpoint(cleanRoot, volumeUsn, QDateTime::currentSecsSinceEpoch(), QStringLiteral("scanning"));
 
-        // Fetch existing indexed metadata under this root for fast incremental reconciliation
         QHash<QString, database::ExistingFileMeta> existingMap = db.queryExistingFilesUnderRoot(cleanRoot);
 
         QVector<QString> dirStack;
@@ -257,7 +268,6 @@ IndexingStatistics FileIndexer::runScanAndReconcile(const QStringList& watchedRo
             const QString currentDir = dirStack.takeLast();
             ++stats.directoriesVisited;
 
-            // Adaptive yield when running on low battery / battery saver
             if ((stats.directoriesVisited & 0x3F) == 0 && isPowerConstrained()) {
                 Sleep(25);
             }
@@ -283,7 +293,6 @@ IndexingStatistics FileIndexer::runScanAndReconcile(const QStringList& watchedRo
                 }
 
                 const DWORD attrs = findData.dwFileAttributes;
-                // Skip reparse points / junctions / symlinks to prevent recursion
                 if ((attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
                     continue;
                 }
@@ -313,7 +322,7 @@ IndexingStatistics FileIndexer::runScanAndReconcile(const QStringList& watchedRo
                     const database::ExistingFileMeta existingMeta = existingIt.value();
                     existingMap.erase(existingIt);
                     if (existingMeta.size == fileSize && existingMeta.mtime == mtime) {
-                        continue; // Unchanged file — skip database write!
+                        continue;
                     }
                 }
 
@@ -345,7 +354,6 @@ IndexingStatistics FileIndexer::runScanAndReconcile(const QStringList& watchedRo
             emit indexingProgress(stats.filesEnumerated);
         }
 
-        // Any remaining entries in existingMap were deleted while Lumen was offline
         if (!existingMap.isEmpty() && !m_cancelRequested.load(std::memory_order_relaxed)) {
             QStringList stalePaths;
             stalePaths.reserve(existingMap.size());
@@ -386,13 +394,103 @@ IndexingStatistics FileIndexer::runScanAndReconcile(const QStringList& watchedRo
     return stats;
 }
 
-void FileIndexer::applyIncrementalChanges(const QVector<FileChangeEvent>& events) {
+qint64 FileIndexer::runContentExtractionPass(int maxContentFiles,
+                                             qint64 maxDocumentBytes,
+                                             double* outElapsedMs) {
+    QElapsedTimer timer;
+    timer.start();
+
+    m_scanning.store(true, std::memory_order_release);
+    auto& db = database::DatabaseManager::instance();
+
+    const QVector<database::ContentExtractionCandidate> candidates =
+        db.queryCandidatesForContentExtraction(maxContentFiles, maxDocumentBytes);
+
+    if (candidates.isEmpty()) {
+        m_scanning.store(false, std::memory_order_release);
+        if (outElapsedMs) {
+            *outElapsedMs = static_cast<double>(timer.nsecsElapsed()) / 1e6;
+        }
+        return 0;
+    }
+
+    qint64 indexedCount = 0;
+    QVector<database::DocumentContentRecord> batch;
+    batch.reserve(kContentBatchSize);
+
+    for (int i = 0; i < candidates.size(); ++i) {
+        if (m_cancelRequested.load(std::memory_order_relaxed)) {
+            break;
+        }
+        while (m_paused.load(std::memory_order_relaxed) && !m_cancelRequested.load(std::memory_order_relaxed)) {
+            Sleep(150);
+        }
+        if ((i & 0x1F) == 0 && isPowerConstrained()) {
+            Sleep(25);
+        }
+
+        const auto& cand = candidates.at(i);
+        // Extract document text WITHOUT holding any database lock
+        const extraction::ExtractedDocument extracted =
+            extraction::DocumentExtractor::extractFromFile(cand.path, maxDocumentBytes);
+
+        if (extracted.success && !extracted.normalizedText.isEmpty()) {
+            database::DocumentContentRecord rec;
+            rec.fileId = cand.fileId;
+            rec.mtime = cand.mtime;
+            rec.pageCount = extracted.pageCount;
+            rec.charCount = static_cast<int>(extracted.normalizedText.size());
+            rec.bodyText = extracted.normalizedText;
+            rec.pageOffsetsJson = extraction::DocumentExtractor::serializePageOffsets(extracted.pageOffsets);
+            batch.append(std::move(rec));
+        }
+
+        if (batch.size() >= kContentBatchSize) {
+            if (db.upsertDocumentContentBatch(batch, &m_cancelRequested)) {
+                indexedCount += batch.size();
+            }
+            batch.clear();
+        }
+    }
+
+    if (!batch.isEmpty() && !m_cancelRequested.load(std::memory_order_relaxed)) {
+        if (db.upsertDocumentContentBatch(batch, &m_cancelRequested)) {
+            indexedCount += batch.size();
+        }
+        batch.clear();
+    }
+
+    if (indexedCount > 0 && !m_cancelRequested.load(std::memory_order_relaxed)) {
+        db.optimizeDocumentFtsIndex();
+        db.walCheckpointTruncate();
+    }
+
+    const double elapsedMs = static_cast<double>(timer.nsecsElapsed()) / 1e6;
+    if (outElapsedMs) {
+        *outElapsedMs = elapsedMs;
+    }
+    m_scanning.store(false, std::memory_order_release);
+
+    core::Logger::info(
+        QStringLiteral("Indexer"),
+        QStringLiteral("Content extraction pass complete in %1 ms (indexed %2/%3 candidate documents).")
+            .arg(elapsedMs, 0, 'f', 2)
+            .arg(indexedCount)
+            .arg(candidates.size()));
+
+    return indexedCount;
+}
+
+void FileIndexer::applyIncrementalChanges(const QVector<FileChangeEvent>& events,
+                                          bool extractContent,
+                                          qint64 maxDocumentBytes) {
     if (events.isEmpty()) {
         return;
     }
 
     auto& db = database::DatabaseManager::instance();
     QVector<database::FileRecord> upserts;
+    bool hasEligibleDocChange = false;
 
     for (const FileChangeEvent& ev : events) {
         if (m_cancelRequested.load(std::memory_order_relaxed)) {
@@ -429,8 +527,8 @@ void FileIndexer::applyIncrementalChanges(const QVector<FileChangeEvent>& events
                     break;
                 }
                 if ((attrData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-                    // Newly created or moved folder: scan its subtree
                     runScanAndReconcile({cleanPath}, QStringList(m_ignoredLower.begin(), m_ignoredLower.end()));
+                    hasEligibleDocChange = true;
                     break;
                 }
 
@@ -447,6 +545,11 @@ void FileIndexer::applyIncrementalChanges(const QVector<FileChangeEvent>& events
                 rec.size = (static_cast<qint64>(attrData.nFileSizeHigh) << 32) |
                            static_cast<qint64>(attrData.nFileSizeLow);
                 rec.mtime = fileTimeToUnixSeconds(attrData.ftLastWriteTime);
+
+                if (extraction::DocumentExtractor::isSupportedExtension(rec.extension) &&
+                    rec.size > 0 && rec.size <= maxDocumentBytes) {
+                    hasEligibleDocChange = true;
+                }
                 upserts.append(std::move(rec));
                 break;
             }
@@ -455,6 +558,10 @@ void FileIndexer::applyIncrementalChanges(const QVector<FileChangeEvent>& events
 
     if (!upserts.isEmpty()) {
         db.upsertFileBatch(upserts, &m_cancelRequested);
+    }
+
+    if (extractContent && hasEligibleDocChange && !m_cancelRequested.load(std::memory_order_relaxed)) {
+        runContentExtractionPass(kDefaultMaxContentFiles, maxDocumentBytes, nullptr);
     }
 
     emit incrementalUpdateApplied(static_cast<int>(events.size()));

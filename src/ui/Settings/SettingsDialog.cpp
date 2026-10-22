@@ -51,13 +51,13 @@ SettingsDialog::SettingsDialog(QWidget* parent)
 
     mainLayout->addWidget(desktopGroup);
 
-    // Indexing Scope group (Phase 1)
-    auto* indexGroup = new QGroupBox(QStringLiteral("Indexing Scope (Phase 1 Filename Index)"), this);
+    // Indexing Scope group (Phase 1 & 2)
+    auto* indexGroup = new QGroupBox(QStringLiteral("Indexing Scope (Filename + Document Content)"), this);
     auto* indexLayout = new QVBoxLayout(indexGroup);
     indexLayout->setSpacing(8);
 
     auto* scopeCaption = new QLabel(
-        QStringLiteral("Approved user folders monitored for offline filename indexing (Documents, Downloads, Desktop):"),
+        QStringLiteral("Approved user folders monitored for offline filename and document content (.txt, .md, .pdf, .docx) indexing:"),
         indexGroup);
     scopeCaption->setWordWrap(true);
     indexLayout->addWidget(scopeCaption);
@@ -108,11 +108,13 @@ void SettingsDialog::loadFromSettings() {
     }
 
     auto& db = database::DatabaseManager::instance();
-    m_dbStatusLabel->setText(QStringLiteral("Indexed Files: %1  •  Database: %2 (Schema v%3, WAL: %4)")
-                                 .arg(db.fileCount())
-                                 .arg(core::AppPaths::databaseFilePath())
-                                 .arg(db.schemaVersion())
-                                 .arg(db.journalMode()));
+    m_dbStatusLabel->setText(
+        QStringLiteral("Indexed Files: %1  •  Content Documents: %2  •  DB: %3 (Schema v%4, WAL: %5)")
+            .arg(db.fileCount())
+            .arg(db.documentContentCount())
+            .arg(core::AppPaths::databaseFilePath())
+            .arg(db.schemaVersion())
+            .arg(db.journalMode()));
 }
 
 void SettingsDialog::onResetPositionClicked() {

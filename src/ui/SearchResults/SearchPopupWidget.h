@@ -21,7 +21,10 @@ public:
         SizeRole,
         MtimeRole,
         MatchStartRole,
-        MatchLengthRole
+        MatchLengthRole,
+        SnippetRole,
+        MatchedPageRole,
+        MatchTypeRole
     };
 
     explicit SearchResultListModel(QObject* parent = nullptr);
@@ -46,6 +49,7 @@ class SearchPopupWidget : public QWidget {
 
 public:
     static constexpr int kRowHeight = 52;
+    static constexpr int kContentRowHeight = 70;
     static constexpr int kFooterHeight = 28;
     static constexpr int kMaxVisibleRows = 6;
 

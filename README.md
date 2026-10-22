@@ -39,6 +39,9 @@
 ### Live Filename Search Results (Virtualized Dropdown)
 ![Lumen Desktop Search Results — Phase 1](docs/screenshots/phase1_desktop_search_results.png)
 
+### Full-Text Document Content Search (`PDF` Page Number + Highlighted Snippets)
+![Lumen Document Content Search Results — Phase 2](docs/screenshots/phase2_content_search_results.png)
+
 ### Native On-Demand Settings Dialog
 ![Lumen Settings Dialog](docs/screenshots/phase0_settings_dialog.png)
 
@@ -50,7 +53,7 @@
 flowchart LR
     subgraph UI["Native UI Layer (Qt 6 Widgets + Win32)"]
         Bar["DesktopSearchBar\n(400×50 px Desktop Pill)"]
-        Popup["SearchPopupWidget\n(Virtualized QListView)"]
+        Popup["SearchPopupWidget\n(Virtualized QListView + Snippets)"]
         Tray["TrayController &\nOn-Demand SettingsDialog"]
     end
 
@@ -60,13 +63,14 @@ flowchart LR
         Watcher["DirectoryWatcher\n(ReadDirectoryChangesW OVERLAPPED)"]
     end
 
-    subgraph Engine["Indexing & Search Engine"]
+    subgraph Engine["Indexing, Extraction & Search Engine"]
         Indexer["FileIndexer\n(FindFirstFileExW + EcoQoS Throttling)"]
+        Extract["DocumentExtractor + DeflateCodec\n(.txt, .md, .docx, .pdf)"]
         Search["FileSearchEngine\n(Cancellable Read-Only Connection)"]
     end
 
     subgraph Storage["Embedded Storage (%LOCALAPPDATA%\\UshaLabs\\Lumen)"]
-        DB[("SQLite 3.47 WAL\nfiles + files_fts (FTS5 Trigram)")]
+        DB[("SQLite 3.47 WAL (Schema v2)\nfiles + files_fts (Trigram)\ndocument_content + document_fts (BM25)")]
         Cfg["settings.json &\nRotating Logs (1 MB cap)"]
     end
 
@@ -74,6 +78,8 @@ flowchart LR
     Bar --> Search
     WinInt --> Bar
     Watcher --> Indexer
+    Indexer --> Extract
+    Extract --> DB
     Indexer --> DB
     Search --> DB
     Tray --> Cfg
@@ -87,8 +93,8 @@ flowchart LR
 |---|---|---|---|
 | **Phase 0** | **Native Foundation + Desktop Search Bar** | **Completed & Verified** | Native `WIN32` C++20/Qt6 executable, upper-right desktop search bar, Win32 `HWND_BOTTOM` + `Win+D` integration, `RegisterHotKey`, single-instance mutex, system tray, SQLite WAL + FTS5 schema, rotating logger |
 | **Phase 1** | **Ultrafast Filename Indexing** | **Completed & Verified** | `FindFirstFileExW` background enumeration, `ReadDirectoryChangesW` real-time watcher, 5,000-row batch SQLite reconciliation, B-tree prefix + FTS5 trigram search engine, relevance ranking, virtualized results UI |
-| **Phase 2** | **Document Content Search** | **In Progress** | Native text extraction (`.txt`, `.md`, `.pdf`, `.docx`), Unicode normalization, FTS5 content indexing, highlighted passage snippets |
-| **Phase 3** | **Offline Semantic Search** | Planned | Lazy-loaded ONNX Runtime CPU inference (`all-MiniLM-L6-v2` quantized), document chunking, embedded vector search, hybrid lexical + semantic ranking |
+| **Phase 2** | **Document Content Search** | **Completed & Verified** | Zero-external-dependency native extractors for `.txt`, `.md`, `.docx` (ZIP + WordprocessingML), and multi-page `.pdf` (`/FlateDecode` + `BT...ET` parser + page offsets), RFC 1951/1950 Deflate with 16 MB ZIP-bomb cap, FTS5 `unicode61` BM25 content search, highlighted snippets & PDF page badges |
+| **Phase 3** | **Offline Semantic Search** | **In Progress** | Lazy-loaded ONNX Runtime CPU inference (`all-MiniLM-L6-v2` quantized), document chunking, embedded vector search, hybrid lexical + semantic ranking |
 | **Phase 4** | **Complete Desktop UX** | Planned | Search modes (`All`, `Files`, `Content`, `Semantic`), quick file preview, context menu actions, `Find Related Documents`, light/dark/system themes |
 | **Phase 5** | **Production Hardening + Microsoft Store** | Planned | Integrity recovery, full settings suite, standalone Windows installer + MSIX package, full benchmark suite |
 
@@ -110,8 +116,8 @@ flowchart LR
 | **Warm Startup to Visible Desktop Bar** | `< 500 ms` | **`33.83 ms` avg** (`32.79 ms` – `36.41 ms` warm; `51.44 ms` cold) | **PASSED** (~14× faster) |
 | **Idle CPU (2-Minute Controlled Test)** | `< 0.1%` avg | **`0.0179%` avg** (`171.88 ms` CPU time across `120.06 s`) | **PASSED** (>5.5× under budget) |
 | **Idle Working Set RAM (Desktop Bar Visible)** | `< 120 MB` (`< 70 MB` stretch) | **`30.44 MB`** (`5.58 MB` Private Bytes) | **PASSED** (Beats stretch goal) |
-| **Standalone `Lumen.exe` Binary Size** | Compact | **`1.38 MB`** (statically embeds SQLite 3.47.2 + FTS5) | **VERIFIED** |
-| **Complete Deployed Bundle Size** | Compact | **`23.92 MB`** (`Lumen.exe` + Qt6 Core/Gui/Widgets DLLs) | **VERIFIED** |
+| **Standalone `Lumen.exe` Binary Size** | Compact | **`1.42 MB`** (statically embeds SQLite 3.47.2 + FTS5 + native extractors) | **VERIFIED** |
+| **Complete Deployed Bundle Size** | Compact | **`23.96 MB`** (`Lumen.exe` + Qt6 Core/Gui/Widgets DLLs) | **VERIFIED** |
 
 ### Phase 1 — 100,000-File Indexing & Search Benchmarks (`phase1_benchmark.exe`)
 
@@ -126,6 +132,20 @@ flowchart LR
 | **Real-Time Incremental Update Latency** | Instant | **Add: `0.92 ms` · Rename: `0.48 ms` · Delete: `0.41 ms`** | **PASSED** |
 | **Post-Indexing Idle CPU** | `< 0.1%` | **`0.0000%`** | **PASSED** |
 | **Post-Indexing Idle Working Set RAM** | `< 120 MB` | **`27.05 MB`** (`14.35 MB` Private Bytes) | **PASSED** |
+
+### Phase 2 — Document Content Extraction & Full-Text Search Benchmarks (`phase2_benchmark.exe`)
+
+| Operation / Metric | Engineering Target | Measured Result (1,000 Physical Documents: 250 TXT, 250 MD, 250 DOCX, 250 3-Page PDF) | Status |
+|---|---|---|---|
+| **End-to-End Indexing (Metadata + Content + FTS5)** | Background throttled | **`878.27 ms`** (`1,000 / 1,000` documents · **`1,138 docs/sec`**) | **PASSED** |
+| **Markdown (`.md`) Extraction Speed** | Fast | **`0.20 ms / doc`** (`50.55 ms` for 250 docs) | **PASSED** |
+| **PDF (`.pdf` 3-page `/FlateDecode`) Extraction Speed** | Fast | **`0.26 ms / doc`** (`66.18 ms` for 250 3-page PDFs with page offset tracking) | **PASSED** |
+| **Word (`.docx` ZIP + XML) Extraction Speed** | Fast | **`0.31 ms / doc`** (`77.43 ms` for 250 DOCX archives) | **PASSED** |
+| **Text (`.txt`) Extraction Speed** | Fast | **`10.15 ms / doc` cold** (`0.20 ms / doc` warm) | **PASSED** |
+| **Full-Text Search Latency — P50 (Median)** | Fast | **`4.70 ms`** (BM25 + `snippet()` + PDF page resolution) | **PASSED** |
+| **Full-Text Search Latency — P95** | `< 150 ms` | **`8.70 ms`** (Max: `10.63 ms` across 30 queries) | **PASSED** (>17× faster) |
+| **Content Index Storage Growth** | Compact | **`0.98 MB`** (`1.00 KB / document` including FTS5 inverted index) | **PASSED** |
+| **Full-Text Search Working Set RAM** | `< 250 MB` | **`18.14 MB` Working Set** (`5.52 MB` Private Bytes) | **PASSED** (>13× under budget) |
 
 ---
 
@@ -144,16 +164,19 @@ Lumen/
 │   ├── main.cpp                    # Entry point, single-instance check, CLI harness
 │   ├── app/                        # LumenApplication & TrayController
 │   ├── core/                       # AppPaths, rotating Logger, SettingsManager
-│   ├── database/                   # DatabaseManager (SQLite3 WAL + FTS5 trigram)
-│   ├── indexing/                   # FileIndexer (FindFirstFileExW) & DirectoryWatcher
-│   ├── search/                     # FileSearchEngine (B-tree prefix + FTS5 + ranking)
+│   ├── database/                   # DatabaseManager (SQLite3 WAL + FTS5 Schema v2)
+│   ├── extraction/                 # DocumentExtractor (.txt/.md/.docx/.pdf) & DeflateCodec
+│   ├── indexing/                   # FileIndexer (FindFirstFileExW + content pass) & DirectoryWatcher
+│   ├── search/                     # FileSearchEngine (B-tree + FTS5 trigram + BM25 content + snippets)
 │   ├── platform/windows/           # DesktopIntegration & SingleInstanceGuard
 │   └── ui/                         # DesktopSearchBar, SearchPopupWidget, SettingsDialog
 ├── tests/
 │   ├── phase0_tests.cpp            # Phase 0 automated QtTest suite (10 tests)
-│   └── phase1_tests.cpp            # Phase 1 automated QtTest suite (7 tests)
+│   ├── phase1_tests.cpp            # Phase 1 automated QtTest suite (7 tests)
+│   └── phase2_tests.cpp            # Phase 2 automated QtTest suite (7 tests)
 ├── benchmarks/
-│   └── phase1_benchmark.cpp        # Reproducible 100,000-file NTFS benchmark
+│   ├── phase1_benchmark.cpp        # Reproducible 100,000-file NTFS filename benchmark
+│   └── phase2_benchmark.cpp        # Reproducible 1,000-document content & FTS5 benchmark
 ├── third_party/
 │   └── sqlite3/                    # Bundled SQLite 3.47.2 amalgamation
 └── docs/
@@ -178,18 +201,19 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/Q
 cmake --build build --config Release
 ```
 
-### 2. Run Automated Tests
+### 2. Run Automated Tests (24 Tests across Phases 0, 1, and 2)
 
 ```powershell
 $env:PATH = "C:\Qt\6.8.2\msvc2022_64\bin;$env:PATH"
 ctest --test-dir build --output-on-failure -V
 ```
 
-### 3. Run the 100,000-File Benchmark
+### 3. Run the Phase 1 & Phase 2 Benchmarks
 
 ```powershell
 $env:PATH = "C:\Qt\6.8.2\msvc2022_64\bin;$env:PATH"
 .\build\phase1_benchmark.exe
+.\build\phase2_benchmark.exe
 ```
 
 ### 4. Deploy Standalone Release Bundle

@@ -28,7 +28,7 @@ bool LumenApplication::initialize(bool startBackgroundIndexer) {
     }
 
     core::Logger::instance().initialize(core::AppPaths::primaryLogFilePath());
-    core::Logger::info(QStringLiteral("App"), QStringLiteral("Starting UshaLabs Lumen v0.2.0 (Phase 1)."));
+    core::Logger::info(QStringLiteral("App"), QStringLiteral("Starting UshaLabs Lumen v0.3.0 (Phase 2)."));
 
     core::SettingsManager::instance().load();
 
@@ -78,7 +78,7 @@ bool LumenApplication::initialize(bool startBackgroundIndexer) {
     }
 
     m_initialized = true;
-    core::Logger::info(QStringLiteral("App"), QStringLiteral("Phase 1 initialization complete."));
+    core::Logger::info(QStringLiteral("App"), QStringLiteral("Phase 2 initialization complete."));
     return true;
 }
 

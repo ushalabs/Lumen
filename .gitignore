@@ -31,3 +31,5 @@ CMakeUserPresets.json
 # Test and benchmark temporary output
 testing_tmp/
 benchmark_results/
+*.log
+

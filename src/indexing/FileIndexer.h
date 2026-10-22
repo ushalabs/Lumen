@@ -17,7 +17,9 @@ struct IndexingStatistics {
     qint64 filesUpserted = 0;
     qint64 filesDeleted = 0;
     qint64 directoriesVisited = 0;
+    qint64 documentsContentIndexed = 0;
     double elapsedMs = 0.0;
+    double contentExtractionMs = 0.0;
     bool usnJournalAvailable = false;
     qint64 volumeNextUsn = 0;
 };
@@ -27,13 +29,19 @@ class FileIndexer : public QObject {
 
 public:
     static constexpr int kBatchTransactionSize = 5000;
+    static constexpr int kContentBatchSize = 100;
+    static constexpr int kDefaultMaxContentFiles = 5000;
+    static constexpr qint64 kDefaultMaxDocumentBytes = 10LL * 1024LL * 1024LL;
 
     explicit FileIndexer(QObject* parent = nullptr);
     ~FileIndexer() override;
 
-    // Starts background enumeration followed by real-time ReadDirectoryChangesW monitoring.
+    // Starts background enumeration, content extraction, and ReadDirectoryChangesW monitoring.
     void startBackgroundIndexing(const QStringList& watchedRoots,
-                                 const QStringList& ignoredDirNames);
+                                 const QStringList& ignoredDirNames,
+                                 bool extractContent = true,
+                                 int maxContentFiles = kDefaultMaxContentFiles,
+                                 qint64 maxDocumentBytes = kDefaultMaxDocumentBytes);
 
     void stop();
 
@@ -41,22 +49,27 @@ public:
     bool isPaused() const noexcept { return m_paused.load(std::memory_order_relaxed); }
     bool isIndexingActive() const noexcept { return m_scanning.load(std::memory_order_relaxed); }
 
-    // Runs an enumeration & reconciliation pass directly (used by worker thread and benchmarks).
+    // Runs filename enumeration & reconciliation pass directly.
     IndexingStatistics runScanAndReconcile(const QStringList& watchedRoots,
                                            const QStringList& ignoredDirNames);
 
-    // Applies incremental file change events immediately.
-    void applyIncrementalChanges(const QVector<FileChangeEvent>& events);
+    // Runs bounded background document content extraction pass on eligible .txt/.md/.pdf/.docx files.
+    qint64 runContentExtractionPass(int maxContentFiles = kDefaultMaxContentFiles,
+                                    qint64 maxDocumentBytes = kDefaultMaxDocumentBytes,
+                                    double* outElapsedMs = nullptr);
 
-    // Probes whether the volume hosting rootPath supports unprivileged or current-token USN journal queries.
+    // Applies incremental file change events (including incremental content extraction when applicable).
+    void applyIncrementalChanges(const QVector<FileChangeEvent>& events,
+                                 bool extractContent = true,
+                                 qint64 maxDocumentBytes = kDefaultMaxDocumentBytes);
+
     static bool probeVolumeUsnJournal(const QString& rootPath, qint64* outNextUsn = nullptr);
-
-    // Checks Windows power/battery policy (true if battery < 20% or battery saver active while unplugged).
     static bool isPowerConstrained();
 
 signals:
     void indexingStarted();
     void indexingProgress(qint64 filesProcessed);
+    void contentIndexingCompleted(qint64 documentsIndexed, double elapsedMs);
     void indexingCompleted(const lumen::indexing::IndexingStatistics& stats);
     void incrementalUpdateApplied(int eventCount);
 

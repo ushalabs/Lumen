@@ -94,6 +94,9 @@ QVariant SearchResultListModel::data(const QModelIndex& index, int role) const {
         case MtimeRole:       return item.mtime;
         case MatchStartRole:  return item.matchStart;
         case MatchLengthRole: return item.matchLength;
+        case SnippetRole:     return item.snippet;
+        case MatchedPageRole: return item.matchedPage;
+        case MatchTypeRole:   return static_cast<int>(item.matchType);
         default:              return {};
     }
 }
@@ -120,6 +123,100 @@ const search::FileSearchResult* SearchResultListModel::resultAt(int row) const n
     return &m_results.at(row);
 }
 
+namespace {
+struct SnippetSegment {
+    QString text;
+    bool highlighted = false;
+};
+
+QVector<SnippetSegment> parseSnippetSegments(const QString& rawSnippet) {
+    QVector<SnippetSegment> segments;
+    int pos = 0;
+    const int n = rawSnippet.size();
+    while (pos < n) {
+        const int openIdx = rawSnippet.indexOf(QChar(0x00AB), pos); // '«'
+        if (openIdx < 0) {
+            segments.push_back({rawSnippet.mid(pos), false});
+            break;
+        }
+        if (openIdx > pos) {
+            segments.push_back({rawSnippet.mid(pos, openIdx - pos), false});
+        }
+        const int closeIdx = rawSnippet.indexOf(QChar(0x00BB), openIdx + 1); // '»'
+        if (closeIdx < 0) {
+            segments.push_back({rawSnippet.mid(openIdx + 1), true});
+            break;
+        }
+        segments.push_back({rawSnippet.mid(openIdx + 1, closeIdx - openIdx - 1), true});
+        pos = closeIdx + 1;
+    }
+    return segments;
+}
+
+void drawHighlightedSnippet(QPainter* painter,
+                            const QRectF& rect,
+                            const QString& rawSnippet,
+                            bool darkTheme) {
+    const QVector<SnippetSegment> segments = parseSnippetSegments(rawSnippet);
+    if (segments.isEmpty()) {
+        return;
+    }
+
+    QFont normalFont(QStringLiteral("Segoe UI"), 8, QFont::Normal);
+    QFont boldFont(QStringLiteral("Segoe UI"), 8, QFont::DemiBold);
+    const QFontMetrics fmNormal(normalFont);
+    const QFontMetrics fmBold(boldFont);
+
+    const QColor normalColor = darkTheme ? QColor(148, 163, 184) : QColor(71, 85, 105);
+    const QColor hlTextColor = darkTheme ? QColor(147, 197, 253) : QColor(29, 78, 216);
+    const QColor hlBgColor = darkTheme ? QColor(59, 130, 246, 55) : QColor(219, 234, 254);
+
+    qreal curX = rect.left();
+    const qreal maxX = rect.right();
+
+    // Small quote/snippet accent bar on the left
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(darkTheme ? QColor(96, 165, 250, 140) : QColor(59, 130, 246, 160));
+    painter->drawRoundedRect(QRectF(curX, rect.top() + 3.0, 2.5, rect.height() - 6.0), 1.2, 1.2);
+    curX += 7.0;
+
+    for (const SnippetSegment& seg : segments) {
+        if (seg.text.isEmpty() || curX >= maxX - 8.0) {
+            continue;
+        }
+        const QFontMetrics& fm = seg.highlighted ? fmBold : fmNormal;
+        const int availPx = static_cast<int>(maxX - curX);
+        QString drawText = seg.text;
+        int advance = fm.horizontalAdvance(drawText);
+        bool truncated = false;
+        if (advance > availPx) {
+            drawText = fm.elidedText(drawText, Qt::ElideRight, availPx);
+            advance = fm.horizontalAdvance(drawText);
+            truncated = true;
+        }
+
+        if (seg.highlighted && !drawText.isEmpty()) {
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(hlBgColor);
+            painter->drawRoundedRect(QRectF(curX - 1.0, rect.top() + 2.0, advance + 2.0, rect.height() - 4.0), 3.0, 3.0);
+            painter->setFont(boldFont);
+            painter->setPen(hlTextColor);
+        } else {
+            painter->setFont(normalFont);
+            painter->setPen(normalColor);
+        }
+
+        painter->drawText(QRectF(curX, rect.top(), advance + 2.0, rect.height()),
+                          Qt::AlignLeft | Qt::AlignVCenter,
+                          drawText);
+        curX += advance;
+        if (truncated) {
+            break;
+        }
+    }
+}
+} // namespace
+
 // ------------------------------------------------------------------------------
 // SearchResultItemDelegate
 // ------------------------------------------------------------------------------
@@ -130,8 +227,10 @@ public:
 
     void setDarkTheme(bool dark) { m_darkTheme = dark; }
 
-    QSize sizeHint(const QStyleOptionViewItem& /*option*/, const QModelIndex& /*index*/) const override {
-        return QSize(380, SearchPopupWidget::kRowHeight);
+    QSize sizeHint(const QStyleOptionViewItem& /*option*/, const QModelIndex& index) const override {
+        const QString snippet = index.data(SearchResultListModel::SnippetRole).toString();
+        const int h = snippet.isEmpty() ? SearchPopupWidget::kRowHeight : SearchPopupWidget::kContentRowHeight;
+        return QSize(380, h);
     }
 
     void paint(QPainter* painter,
@@ -167,6 +266,10 @@ public:
         const qint64 mtime = index.data(SearchResultListModel::MtimeRole).toLongLong();
         const int matchStart = index.data(SearchResultListModel::MatchStartRole).toInt();
         const int matchLen = index.data(SearchResultListModel::MatchLengthRole).toInt();
+        const QString snippet = index.data(SearchResultListModel::SnippetRole).toString();
+        const int matchedPage = index.data(SearchResultListModel::MatchedPageRole).toInt();
+        const auto matchType = static_cast<search::SearchResultMatchType>(
+            index.data(SearchResultListModel::MatchTypeRole).toInt());
 
         // 1. Left File Icon Badge
         const QRectF iconBox(rowRect.left() + 10.0, rowRect.top() + 9.0, 30.0, 30.0);
@@ -180,20 +283,55 @@ public:
         const QString badgeLabel = ext.isEmpty() ? QStringLiteral("FILE") : ext.left(4).toUpper();
         painter->drawText(iconBox, Qt::AlignCenter, badgeLabel);
 
-        // 2. Top Line: Filename (with highlighted match range)
+        // 2. Top-Right: Optional Content / Page pill + File size label
         const qreal textLeft = iconBox.right() + 10.0;
         const qreal rightMargin = rowRect.right() - 10.0;
         const qreal availWidth = rightMargin - textLeft;
 
+        QFont metaFont(QStringLiteral("Segoe UI"), 8, QFont::Normal);
+        painter->setFont(metaFont);
+        const QFontMetrics fmMeta(metaFont);
+        const QColor secondaryText = m_darkTheme ? QColor(148, 163, 184) : QColor(100, 116, 139);
+        const QString sizeStr = formatHumanSize(fileSize);
+        const int sizeWidth = fmMeta.horizontalAdvance(sizeStr) + 6;
+
+        painter->setPen(secondaryText);
+        painter->drawText(QRectF(rightMargin - sizeWidth, rowRect.top() + 4.0, sizeWidth, 20.0),
+                          Qt::AlignRight | Qt::AlignVCenter,
+                          sizeStr);
+
+        int rightReservedWidth = sizeWidth + 6;
+        if (matchType != search::SearchResultMatchType::Filename || matchedPage > 0) {
+            const QString pillLabel = (matchedPage > 0)
+                                          ? QStringLiteral("Page %1").arg(matchedPage)
+                                          : QStringLiteral("Content");
+            QFont pillFont(QStringLiteral("Segoe UI"), 7, QFont::DemiBold);
+            const QFontMetrics fmPill(pillFont);
+            const int pillW = fmPill.horizontalAdvance(pillLabel) + 12;
+            const QRectF pillRect(rightMargin - rightReservedWidth - pillW,
+                                  rowRect.top() + 6.0,
+                                  pillW,
+                                  16.0);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(m_darkTheme ? QColor(16, 185, 129, 45) : QColor(209, 250, 229));
+            painter->drawRoundedRect(pillRect, 4.0, 4.0);
+            painter->setFont(pillFont);
+            painter->setPen(m_darkTheme ? QColor(110, 231, 183) : QColor(4, 120, 87));
+            painter->drawText(pillRect, Qt::AlignCenter, pillLabel);
+            rightReservedWidth += pillW + 6;
+        }
+
+        // 3. Top Line: Filename (with highlighted match range)
         QFont nameFont(QStringLiteral("Segoe UI"), 9, QFont::DemiBold);
         painter->setFont(nameFont);
         const QFontMetrics fmName(nameFont);
-        const QString elidedName = fmName.elidedText(fileName, Qt::ElideMiddle, static_cast<int>(availWidth - 52));
+        const int maxNameWidth = std::max(60, static_cast<int>(availWidth - rightReservedWidth));
+        const QString elidedName = fmName.elidedText(fileName, Qt::ElideMiddle, maxNameWidth);
 
         const QColor primaryText = m_darkTheme ? QColor(241, 245, 249) : QColor(15, 23, 42);
         const QColor highlightBg = m_darkTheme ? QColor(59, 130, 246, 75) : QColor(219, 234, 254);
 
-        const QRectF nameRect(textLeft, rowRect.top() + 5.0, availWidth - 48.0, 20.0);
+        const QRectF nameRect(textLeft, rowRect.top() + 4.0, maxNameWidth, 20.0);
         if (matchStart >= 0 && matchLen > 0 && elidedName == fileName &&
             matchStart + matchLen <= fileName.size()) {
             const QString prefix = fileName.left(matchStart);
@@ -201,40 +339,36 @@ public:
             const int hlW = fmName.horizontalAdvance(fileName.mid(matchStart, matchLen));
             painter->setPen(Qt::NoPen);
             painter->setBrush(highlightBg);
-            painter->drawRoundedRect(QRectF(hlX - 1.0, rowRect.top() + 7.0, hlW + 2.0, 16.0), 3.0, 3.0);
+            painter->drawRoundedRect(QRectF(hlX - 1.0, rowRect.top() + 6.0, hlW + 2.0, 16.0), 3.0, 3.0);
         }
 
         painter->setPen(primaryText);
         painter->drawText(nameRect, Qt::AlignLeft | Qt::AlignVCenter, elidedName);
 
-        // 3. Top-Right: File size label
-        QFont metaFont(QStringLiteral("Segoe UI"), 8, QFont::Normal);
+        // 4. Second Line: Elided parent folder path + modification date
         painter->setFont(metaFont);
-        const QColor secondaryText = m_darkTheme ? QColor(148, 163, 184) : QColor(100, 116, 139);
         painter->setPen(secondaryText);
-
-        const QString sizeStr = formatHumanSize(fileSize);
-        painter->drawText(QRectF(rightMargin - 64.0, rowRect.top() + 5.0, 64.0, 20.0),
-                          Qt::AlignRight | Qt::AlignVCenter,
-                          sizeStr);
-
-        // 4. Bottom Line: Elided parent folder path + modification date
         const QString dateStr = (mtime > 0)
                                     ? QDateTime::fromSecsSinceEpoch(mtime).toString(QStringLiteral("MMM d, yyyy"))
                                     : QString();
-        const QFontMetrics fmMeta(metaFont);
         const int dateWidth = dateStr.isEmpty() ? 0 : (fmMeta.horizontalAdvance(dateStr) + 10);
         const QString elidedDir = fmMeta.elidedText(
             parentDir, Qt::ElideMiddle, static_cast<int>(availWidth - dateWidth));
 
-        painter->drawText(QRectF(textLeft, rowRect.top() + 24.0, availWidth - dateWidth, 18.0),
+        painter->drawText(QRectF(textLeft, rowRect.top() + 23.0, availWidth - dateWidth, 18.0),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           elidedDir);
 
         if (!dateStr.isEmpty()) {
-            painter->drawText(QRectF(rightMargin - dateWidth, rowRect.top() + 24.0, dateWidth, 18.0),
+            painter->drawText(QRectF(rightMargin - dateWidth, rowRect.top() + 23.0, dateWidth, 18.0),
                               Qt::AlignRight | Qt::AlignVCenter,
                               dateStr);
+        }
+
+        // 5. Third Line (when content snippet is available): Highlighted snippet
+        if (!snippet.isEmpty()) {
+            const QRectF snippetRect(textLeft, rowRect.top() + 42.0, availWidth, 19.0);
+            drawHighlightedSnippet(painter, snippetRect, snippet, m_darkTheme);
         }
 
         painter->restore();
@@ -258,7 +392,7 @@ SearchPopupWidget::SearchPopupWidget(QWidget* parent)
     m_listView = new QListView(this);
     m_listView->setModel(m_model);
     m_listView->setItemDelegate(m_delegate);
-    m_listView->setUniformItemSizes(true);
+    m_listView->setUniformItemSizes(false);
     m_listView->setFrameShape(QFrame::NoFrame);
     m_listView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_listView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
@@ -375,7 +509,12 @@ int SearchPopupWidget::desiredPopupHeight() const noexcept {
         return 112;
     }
     const int visibleRows = qMin(count, kMaxVisibleRows);
-    return 10 + (visibleRows * kRowHeight) + kFooterHeight;
+    int rowsHeight = 0;
+    const auto& items = m_model->results();
+    for (int i = 0; i < visibleRows && i < items.size(); ++i) {
+        rowsHeight += items.at(i).snippet.isEmpty() ? kRowHeight : kContentRowHeight;
+    }
+    return 10 + rowsHeight + kFooterHeight;
 }
 
 QString SearchPopupWidget::statusHeadline() const {

@@ -28,6 +28,23 @@ struct ExistingFileMeta {
     qint64 mtime = 0;
 };
 
+struct DocumentContentRecord {
+    qint64 fileId = 0;
+    qint64 mtime = 0;
+    int pageCount = 1;
+    int charCount = 0;
+    QString bodyText;
+    QString pageOffsetsJson;
+};
+
+struct ContentExtractionCandidate {
+    qint64 fileId = 0;
+    QString path;
+    QString extension;
+    qint64 size = 0;
+    qint64 mtime = 0;
+};
+
 // RAII wrapper for sqlite3_stmt
 class ScopedStmt {
 public:
@@ -54,7 +71,7 @@ private:
 
 class DatabaseManager {
 public:
-    static constexpr int kCurrentSchemaVersion = 1;
+    static constexpr int kCurrentSchemaVersion = 2;
 
     static DatabaseManager& instance();
 
@@ -71,6 +88,7 @@ public:
     bool indexExists(const QString& indexName) const;
     QStringList tableColumns(const QString& tableName) const;
     qint64 fileCount() const;
+    qint64 documentContentCount() const;
 
     // Phase 1 writer and reconciliation operations (single-writer serialized via m_writeMutex)
     QHash<QString, ExistingFileMeta> queryExistingFilesUnderRoot(const QString& rootDirectory) const;
@@ -86,6 +104,16 @@ public:
                     const QString& newName,
                     const QString& newExt);
     bool clearAllFiles();
+
+    // Phase 2 Document Content Indexing operations
+    QVector<ContentExtractionCandidate> queryCandidatesForContentExtraction(
+        int maxTotalContentFiles = 5000,
+        qint64 maxFileSizeBytes = 10LL * 1024LL * 1024LL) const;
+
+    bool upsertDocumentContentBatch(const QVector<DocumentContentRecord>& records,
+                                    const std::atomic_bool* cancelFlag = nullptr);
+    bool upsertDocumentContent(const DocumentContentRecord& record);
+    bool optimizeDocumentFtsIndex();
 
     bool updateCheckpoint(const QString& rootPath,
                           qint64 lastUsn,

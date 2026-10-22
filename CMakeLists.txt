@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(Lumen
-    VERSION 0.2.0
+    VERSION 0.3.0
     DESCRIPTION "Lumen — Lightweight Offline Intelligent Search for Windows"
     HOMEPAGE_URL "https://ushalabs.com"
     LANGUAGES C CXX RC
@@ -49,7 +49,7 @@ if(MSVC)
 endif()
 
 # ------------------------------------------------------------------------------
-# Lumen Core, Indexing, Search & UI Static Library
+# Lumen Core, Indexing, Extraction, Search & UI Static Library
 # ------------------------------------------------------------------------------
 set(LUMEN_LIB_SOURCES
     src/core/AppPaths.h
@@ -60,6 +60,10 @@ set(LUMEN_LIB_SOURCES
     src/core/SettingsManager.cpp
     src/database/DatabaseManager.h
     src/database/DatabaseManager.cpp
+    src/extraction/DeflateCodec.h
+    src/extraction/DeflateCodec.cpp
+    src/extraction/DocumentExtractor.h
+    src/extraction/DocumentExtractor.cpp
     src/indexing/DirectoryWatcher.h
     src/indexing/DirectoryWatcher.cpp
     src/indexing/FileIndexer.h
@@ -121,7 +125,7 @@ if(MSVC)
 endif()
 
 # ------------------------------------------------------------------------------
-# Automated Phase 0 & Phase 1 Test Suites + 100k-File Benchmark
+# Automated Phase 0, Phase 1 & Phase 2 Test Suites + Benchmarks
 # ------------------------------------------------------------------------------
 enable_testing()
 
@@ -143,9 +147,25 @@ target_link_libraries(phase1_tests PRIVATE
 )
 add_test(NAME Phase1Tests COMMAND phase1_tests)
 
+add_executable(phase2_tests
+    tests/phase2_tests.cpp
+)
+target_link_libraries(phase2_tests PRIVATE
+    lumen_lib
+    Qt6::Test
+)
+add_test(NAME Phase2Tests COMMAND phase2_tests)
+
 add_executable(phase1_benchmark
     benchmarks/phase1_benchmark.cpp
 )
 target_link_libraries(phase1_benchmark PRIVATE
+    lumen_lib
+)
+
+add_executable(phase2_benchmark
+    benchmarks/phase2_benchmark.cpp
+)
+target_link_libraries(phase2_benchmark PRIVATE
     lumen_lib
 )
