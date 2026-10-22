@@ -1,6 +1,7 @@
 #include "ui/BrandingIcon.h"
 
 #include <QColor>
+#include <QLinearGradient>
 #include <QPainterPath>
 #include <QPen>
 
@@ -20,14 +21,19 @@ void BrandingIcon::paintLumenMark(QPainter* painter, const QRectF& targetRect, b
                      size,
                      size);
 
-    // Rounded sapphire badge background (#2563EB)
+    // Rounded Downshift magenta/pink gradient badge (#F63D98 -> #EC1680 -> #BD0D6B)
     const qreal radius = size * 0.28;
+    QLinearGradient pinkGrad(box.topLeft(), box.bottomLeft());
+    pinkGrad.setColorAt(0.0, QColor(246, 61, 152)); // #F63D98 (luminous top)
+    pinkGrad.setColorAt(0.5, QColor(236, 22, 128)); // #EC1680 (Downshift primary)
+    pinkGrad.setColorAt(1.0, QColor(189, 13, 107)); // #BD0D6B (rich magenta base)
+
     painter->setPen(Qt::NoPen);
-    painter->setBrush(QColor(37, 99, 235));
+    painter->setBrush(pinkGrad);
     painter->drawRoundedRect(box, radius, radius);
 
-    // Subtle inner highlight border
-    QPen rimPen(QColor(255, 255, 255, 45));
+    // Subtle inner highlight border (matching Downshift's top rim glow)
+    QPen rimPen(QColor(255, 255, 255, 75));
     rimPen.setWidthF(qMax(1.0, size * 0.04));
     painter->setPen(rimPen);
     painter->setBrush(Qt::NoBrush);

@@ -7,6 +7,7 @@
 #include "semantic/SemanticEmbeddingEngine.h"
 #include "ui/BrandingIcon.h"
 #include "ui/SearchResults/SearchPopupWidget.h"
+#include "ui/Theme.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -51,9 +52,9 @@ DesktopSearchBar::DesktopSearchBar(QWidget* parent)
     m_searchPool.setExpiryTimeout(5000); // Reclaim search worker thread after 5s of inactivity
 
     m_searchEdit = new QLineEdit(this);
-    m_searchEdit->setPlaceholderText(QStringLiteral("Search your files..."));
+    m_searchEdit->setPlaceholderText(QStringLiteral("Search anything on your PC..."));
     m_searchEdit->setFrame(false);
-    m_searchEdit->setGeometry(48, 9, kBarWidth - 48 - 102, 32);
+    m_searchEdit->setGeometry(50, 10, kBarWidth - 50 - 105, 32);
     m_searchEdit->setFont(QFont(QStringLiteral("Segoe UI"), 10));
     m_searchEdit->setAttribute(Qt::WA_MacShowFocusRect, false);
     m_searchEdit->setContextMenuPolicy(Qt::DefaultContextMenu);
@@ -230,9 +231,10 @@ void DesktopSearchBar::refreshAppearanceFromSettings() {
         m_darkTheme = false;
     }
 
-    const QString textColor = m_darkTheme ? QStringLiteral("#F1F5F9") : QStringLiteral("#0F172A");
-    const QString placeholderColor = m_darkTheme ? QStringLiteral("#94A3B8") : QStringLiteral("#64748B");
-    const QString selectionBg = QStringLiteral("#2563EB");
+    const auto theme = ThemeTokens::get(m_darkTheme);
+    const QString textColor = theme.textPrimary.name();
+    const QString placeholderColor = theme.textSecondary.name();
+    const QString selectionBg = theme.brandPink.name();
 
     m_searchEdit->setStyleSheet(QStringLiteral(
         "QLineEdit {"
@@ -464,10 +466,10 @@ void DesktopSearchBar::onSearchTextChanged(const QString& text) {
         }
         ++m_queryGeneration;
         m_popupWidget->clearResults();
-        m_searchEdit->setGeometry(48, 9, kBarWidth - 48 - 102, 32);
+        m_searchEdit->setGeometry(50, 10, kBarWidth - 50 - 105, 32);
         setPopupExpanded(false);
     } else {
-        m_searchEdit->setGeometry(48, 9, kBarWidth - 48 - 44, 32);
+        m_searchEdit->setGeometry(50, 10, kBarWidth - 50 - 46, 32);
         setPopupExpanded(true);
         dispatchAsyncSearch(trimmed);
     }
@@ -554,7 +556,7 @@ void DesktopSearchBar::onScreenConfigurationChanged() {
 }
 
 QRectF DesktopSearchBar::clearButtonHitRect() const {
-    return QRectF(kBarWidth - 36.0, 13.0, 24.0, 24.0);
+    return QRectF(kBarWidth - 38.0, 14.0, 24.0, 24.0);
 }
 
 void DesktopSearchBar::paintEvent(QPaintEvent* /*event*/) {
@@ -562,34 +564,34 @@ void DesktopSearchBar::paintEvent(QPaintEvent* /*event*/) {
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.setRenderHint(QPainter::TextAntialiasing, true);
 
+    const auto theme = ThemeTokens::get(m_darkTheme);
     const QRectF barBounds(1.0, 1.0, kBarWidth - 2.0, kBarHeight - 2.0);
-    const qreal radius = 12.0;
+    const qreal radius = 14.0;
 
+    // Soft elevated shadow
     painter.setPen(Qt::NoPen);
-    painter.setBrush(m_darkTheme ? QColor(0, 0, 0, 95) : QColor(15, 23, 42, 20));
-    painter.drawRoundedRect(barBounds.adjusted(0.0, 1.5, 0.0, 1.5), radius, radius);
+    painter.setBrush(theme.shadowColor);
+    painter.drawRoundedRect(barBounds.adjusted(0.0, 2.0, 0.0, 2.0), radius, radius);
 
-    const QColor bgColor = m_darkTheme ? QColor(30, 34, 42, 248) : QColor(250, 251, 253, 252);
+    // Surface and interactive focus border
     const bool hasFocus = m_isSearchActive || m_searchEdit->hasFocus();
-    const QColor borderColor = hasFocus
-                                   ? (m_darkTheme ? QColor(59, 130, 246) : QColor(37, 99, 235))
-                                   : (m_darkTheme ? QColor(56, 65, 82) : QColor(213, 220, 230));
-
-    QPen borderPen(borderColor, hasFocus ? 1.4 : 1.0);
+    const QColor borderColor = hasFocus ? theme.brandPink : theme.borderColor;
+    QPen borderPen(borderColor, hasFocus ? 1.6 : 1.0);
     painter.setPen(borderPen);
-    painter.setBrush(bgColor);
+    painter.setBrush(theme.surfaceBackground);
     painter.drawRoundedRect(barBounds.adjusted(0.0, 0.0, 0.0, -1.0), radius, radius);
 
-    const QRectF iconRect(14.0, 13.0, 24.0, 24.0);
+    // Left Lumen mark in Downshift pink gradient
+    const QRectF iconRect(14.0, 14.0, 24.0, 24.0);
     BrandingIcon::paintLumenMark(&painter, iconRect, m_darkTheme);
 
     if (!m_searchEdit->text().isEmpty()) {
         const QRectF clearRect = clearButtonHitRect();
         painter.setPen(Qt::NoPen);
-        painter.setBrush(m_darkTheme ? QColor(51, 65, 85, 160) : QColor(226, 232, 240, 190));
+        painter.setBrush(theme.brandPinkTint);
         painter.drawEllipse(clearRect);
 
-        QPen xPen(m_darkTheme ? QColor(203, 213, 225) : QColor(71, 85, 105), 1.5);
+        QPen xPen(theme.brandPink, 1.6);
         xPen.setCapStyle(Qt::RoundCap);
         painter.setPen(xPen);
         const QPointF c = clearRect.center();
@@ -597,14 +599,14 @@ void DesktopSearchBar::paintEvent(QPaintEvent* /*event*/) {
         painter.drawLine(QPointF(c.x() - d, c.y() - d), QPointF(c.x() + d, c.y() + d));
         painter.drawLine(QPointF(c.x() + d, c.y() - d), QPointF(c.x() - d, c.y() + d));
     } else {
-        const QRectF pillRect(kBarWidth - 96.0, 14.0, 82.0, 22.0);
-        painter.setPen(QPen(m_darkTheme ? QColor(51, 65, 85) : QColor(226, 232, 240), 1.0));
-        painter.setBrush(m_darkTheme ? QColor(39, 46, 58) : QColor(241, 245, 249));
-        painter.drawRoundedRect(pillRect, 6.0, 6.0);
+        const QRectF pillRect(kBarWidth - 100.0, 14.0, 86.0, 24.0);
+        painter.setPen(QPen(theme.borderColor, 1.0));
+        painter.setBrush(theme.elevatedBackground);
+        painter.drawRoundedRect(pillRect, 7.0, 7.0);
 
         QFont pillFont(QStringLiteral("Segoe UI"), 8, QFont::Medium);
         painter.setFont(pillFont);
-        painter.setPen(m_darkTheme ? QColor(148, 163, 184) : QColor(100, 116, 139));
+        painter.setPen(theme.textSecondary);
         painter.drawText(pillRect, Qt::AlignCenter, core::SettingsManager::instance().globalShortcut());
     }
 }

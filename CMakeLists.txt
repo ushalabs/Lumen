@@ -80,6 +80,8 @@ set(LUMEN_LIB_SOURCES
     src/platform/windows/SingleInstanceGuard.cpp
     src/platform/windows/DesktopIntegration.h
     src/platform/windows/DesktopIntegration.cpp
+    src/ui/Theme.h
+    src/ui/Theme.cpp
     src/ui/BrandingIcon.h
     src/ui/BrandingIcon.cpp
     src/ui/SearchResults/SearchPopupWidget.h

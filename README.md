@@ -245,15 +245,16 @@ $env:PATH = "C:\Qt\6.8.2\msvc2022_64\bin;$env:PATH"
 .\build\phase3_benchmark.exe
 ```
 
-### 4. Deploy Standalone Release Bundle
+### 4. Build Windows Setup Package (Installer & Portable Bundle)
 
 ```powershell
-New-Item -ItemType Directory -Force -Path build\deploy | Out-Null
-Copy-Item build\Lumen.exe build\deploy\Lumen.exe -Force
-Copy-Item third_party\onnxruntime\lib\*.dll build\deploy\ -Force
-C:\Qt\6.8.2\msvc2022_64\bin\windeployqt.exe --release --no-translations --no-opengl-sw --no-system-d3d-compiler --no-network build\deploy\Lumen.exe
-.\build\deploy\Lumen.exe
+powershell -ExecutionPolicy Bypass -File packaging\build_setup.ps1 -Version "0.5.0"
 ```
+
+Output artifacts generated in `dist/`:
+- **Installer:** `dist\Lumen-v0.5.0-Setup-x64.exe` (Solid LZMA compressed standalone installer, publisher: **UshaLabs**)
+- **Portable:** `dist\Lumen-v0.5.0-windows-x64.zip` (Pre-deployed folder with Qt6, ONNX Runtime, and MiniLM-L6-v2)
+- **Checksums:** `dist\SHA256SUMS.txt`
 
 ---
 

@@ -2,6 +2,7 @@
 
 #include "core/SettingsManager.h"
 #include "database/DatabaseManager.h"
+#include "ui/Theme.h"
 
 #include <QClipboard>
 #include <QColor>
@@ -35,42 +36,56 @@ QString formatHumanSize(qint64 bytes) {
     return QStringLiteral("%1 GB").arg(static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0), 0, 'f', 2);
 }
 
-QColor extensionBadgeColor(const QString& extLower, bool darkTheme) {
+QColor extensionBadgeColor(const QString& extLower, const ThemeTokens& theme) {
     if (extLower == QStringLiteral("pdf")) {
-        return darkTheme ? QColor(239, 68, 68, 55) : QColor(254, 226, 226);
+        return theme.badgePdfBg;
     }
-    if (extLower == QStringLiteral("doc") || extLower == QStringLiteral("docx") ||
-        extLower == QStringLiteral("txt") || extLower == QStringLiteral("md")) {
-        return darkTheme ? QColor(59, 130, 246, 55) : QColor(219, 234, 254);
+    if (extLower == QStringLiteral("doc") || extLower == QStringLiteral("docx")) {
+        return theme.badgeDocBg;
+    }
+    if (extLower == QStringLiteral("txt") || extLower == QStringLiteral("md")) {
+        return theme.badgeTxtBg;
     }
     if (extLower == QStringLiteral("xls") || extLower == QStringLiteral("xlsx") ||
         extLower == QStringLiteral("csv")) {
-        return darkTheme ? QColor(16, 185, 129, 55) : QColor(209, 250, 229);
+        return theme.badgeSheetBg;
     }
     if (extLower == QStringLiteral("png") || extLower == QStringLiteral("jpg") ||
         extLower == QStringLiteral("jpeg") || extLower == QStringLiteral("svg")) {
-        return darkTheme ? QColor(168, 85, 247, 55) : QColor(243, 232, 255);
+        return theme.badgeImageBg;
     }
-    return darkTheme ? QColor(71, 85, 105, 80) : QColor(241, 245, 249);
+    if (extLower == QStringLiteral("cpp") || extLower == QStringLiteral("h") ||
+        extLower == QStringLiteral("py") || extLower == QStringLiteral("js") ||
+        extLower == QStringLiteral("ts") || extLower == QStringLiteral("html")) {
+        return theme.badgeCodeBg;
+    }
+    return theme.elevatedBackground;
 }
 
-QColor extensionTextColor(const QString& extLower, bool darkTheme) {
+QColor extensionTextColor(const QString& extLower, const ThemeTokens& theme) {
     if (extLower == QStringLiteral("pdf")) {
-        return darkTheme ? QColor(252, 165, 165) : QColor(185, 28, 28);
+        return theme.badgePdfText;
     }
-    if (extLower == QStringLiteral("doc") || extLower == QStringLiteral("docx") ||
-        extLower == QStringLiteral("txt") || extLower == QStringLiteral("md")) {
-        return darkTheme ? QColor(147, 197, 253) : QColor(29, 78, 216);
+    if (extLower == QStringLiteral("doc") || extLower == QStringLiteral("docx")) {
+        return theme.badgeDocText;
+    }
+    if (extLower == QStringLiteral("txt") || extLower == QStringLiteral("md")) {
+        return theme.badgeTxtText;
     }
     if (extLower == QStringLiteral("xls") || extLower == QStringLiteral("xlsx") ||
         extLower == QStringLiteral("csv")) {
-        return darkTheme ? QColor(110, 231, 183) : QColor(4, 120, 87);
+        return theme.badgeSheetText;
     }
     if (extLower == QStringLiteral("png") || extLower == QStringLiteral("jpg") ||
         extLower == QStringLiteral("jpeg") || extLower == QStringLiteral("svg")) {
-        return darkTheme ? QColor(216, 180, 254) : QColor(109, 40, 217);
+        return theme.badgeImageText;
     }
-    return darkTheme ? QColor(203, 213, 225) : QColor(71, 85, 105);
+    if (extLower == QStringLiteral("cpp") || extLower == QStringLiteral("h") ||
+        extLower == QStringLiteral("py") || extLower == QStringLiteral("js") ||
+        extLower == QStringLiteral("ts") || extLower == QStringLiteral("html")) {
+        return theme.badgeCodeText;
+    }
+    return theme.textSecondary;
 }
 } // namespace
 
@@ -170,7 +185,7 @@ QVector<SnippetSegment> parseSnippetSegments(const QString& rawInput) {
 void drawHighlightedSnippet(QPainter* painter,
                             const QRectF& rect,
                             const QString& rawSnippet,
-                            bool darkTheme) {
+                            const ThemeTokens& theme) {
     const QVector<SnippetSegment> segments = parseSnippetSegments(rawSnippet);
     if (segments.isEmpty()) {
         return;
@@ -181,15 +196,16 @@ void drawHighlightedSnippet(QPainter* painter,
     const QFontMetrics fmNormal(normalFont);
     const QFontMetrics fmBold(boldFont);
 
-    const QColor normalColor = darkTheme ? QColor(148, 163, 184) : QColor(71, 85, 105);
-    const QColor hlTextColor = darkTheme ? QColor(147, 197, 253) : QColor(29, 78, 216);
-    const QColor hlBgColor = darkTheme ? QColor(59, 130, 246, 55) : QColor(219, 234, 254);
+    const QColor normalColor = theme.textSecondary;
+    const QColor hlTextColor = theme.brandPink;
+    const QColor hlBgColor = theme.brandPinkSelected;
 
     qreal curX = rect.left();
     const qreal maxX = rect.right();
 
+    // Subtle Downshift pink vertical indicator
     painter->setPen(Qt::NoPen);
-    painter->setBrush(darkTheme ? QColor(96, 165, 250, 140) : QColor(59, 130, 246, 160));
+    painter->setBrush(theme.brandPink);
     painter->drawRoundedRect(QRectF(curX, rect.top() + 3.0, 2.5, rect.height() - 6.0), 1.2, 1.2);
     curX += 7.0;
 
@@ -253,20 +269,22 @@ public:
         painter->setRenderHint(QPainter::Antialiasing, true);
         painter->setRenderHint(QPainter::TextAntialiasing, true);
 
+        const auto theme = ThemeTokens::get(m_darkTheme);
         const QRectF rowRect = QRectF(option.rect).adjusted(6.0, 2.0, -6.0, -2.0);
         const bool isSelected = (option.state & QStyle::State_Selected) != 0;
         const bool isHovered = (option.state & QStyle::State_MouseOver) != 0;
 
         if (isSelected) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(m_darkTheme ? QColor(59, 130, 246, 48) : QColor(239, 246, 255));
+            painter->setBrush(theme.brandPinkTint);
             painter->drawRoundedRect(rowRect, 8.0, 8.0);
 
-            painter->setBrush(m_darkTheme ? QColor(96, 165, 250) : QColor(37, 99, 235));
+            // Left accent bar in Downshift Pink
+            painter->setBrush(theme.brandPink);
             painter->drawRoundedRect(QRectF(rowRect.left() + 2.0, rowRect.top() + 8.0, 3.0, rowRect.height() - 16.0), 1.5, 1.5);
         } else if (isHovered) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(m_darkTheme ? QColor(51, 65, 85, 70) : QColor(248, 250, 252));
+            painter->setBrush(theme.elevatedBackground);
             painter->drawRoundedRect(rowRect, 8.0, 8.0);
         }
 
@@ -286,12 +304,12 @@ public:
         // 1. Left File Icon Badge
         const QRectF iconBox(rowRect.left() + 10.0, rowRect.top() + 9.0, 30.0, 30.0);
         painter->setPen(Qt::NoPen);
-        painter->setBrush(extensionBadgeColor(ext, m_darkTheme));
+        painter->setBrush(extensionBadgeColor(ext, theme));
         painter->drawRoundedRect(iconBox, 7.0, 7.0);
 
         QFont iconFont(QStringLiteral("Segoe UI"), 7, QFont::Bold);
         painter->setFont(iconFont);
-        painter->setPen(extensionTextColor(ext, m_darkTheme));
+        painter->setPen(extensionTextColor(ext, theme));
         const QString badgeLabel = ext.isEmpty() ? QStringLiteral("FILE") : ext.left(4).toUpper();
         painter->drawText(iconBox, Qt::AlignCenter, badgeLabel);
 
@@ -303,7 +321,7 @@ public:
         QFont metaFont(QStringLiteral("Segoe UI"), 8, QFont::Normal);
         painter->setFont(metaFont);
         const QFontMetrics fmMeta(metaFont);
-        const QColor secondaryText = m_darkTheme ? QColor(148, 163, 184) : QColor(100, 116, 139);
+        const QColor secondaryText = theme.textSecondary;
         const QString sizeStr = formatHumanSize(fileSize);
         const int sizeWidth = fmMeta.horizontalAdvance(sizeStr) + 6;
 
@@ -340,16 +358,16 @@ public:
                                   16.0);
             painter->setPen(Qt::NoPen);
             if (isSemantic) {
-                painter->setBrush(m_darkTheme ? QColor(139, 92, 246, 55) : QColor(237, 233, 254));
+                painter->setBrush(theme.semanticBadgeBg);
             } else {
-                painter->setBrush(m_darkTheme ? QColor(16, 185, 129, 45) : QColor(209, 250, 229));
+                painter->setBrush(theme.contentBadgeBg);
             }
             painter->drawRoundedRect(pillRect, 4.0, 4.0);
             painter->setFont(pillFont);
             if (isSemantic) {
-                painter->setPen(m_darkTheme ? QColor(196, 181, 253) : QColor(109, 40, 217));
+                painter->setPen(theme.semanticBadgeText);
             } else {
-                painter->setPen(m_darkTheme ? QColor(110, 231, 183) : QColor(4, 120, 87));
+                painter->setPen(theme.contentBadgeText);
             }
             painter->drawText(pillRect, Qt::AlignCenter, pillLabel);
             rightReservedWidth += pillW + 6;
@@ -365,10 +383,10 @@ public:
                                   pillW,
                                   16.0);
             painter->setPen(Qt::NoPen);
-            painter->setBrush(m_darkTheme ? QColor(245, 158, 11, 55) : QColor(254, 243, 199));
+            painter->setBrush(theme.pinnedBadgeBg);
             painter->drawRoundedRect(pillRect, 4.0, 4.0);
             painter->setFont(pillFont);
-            painter->setPen(m_darkTheme ? QColor(253, 224, 71) : QColor(180, 83, 9));
+            painter->setPen(theme.pinnedBadgeText);
             painter->drawText(pillRect, Qt::AlignCenter, pinLabel);
             rightReservedWidth += pillW + 6;
         }
@@ -380,8 +398,8 @@ public:
         const int maxNameWidth = std::max(60, static_cast<int>(availWidth - rightReservedWidth));
         const QString elidedName = fmName.elidedText(fileName, Qt::ElideMiddle, maxNameWidth);
 
-        const QColor primaryText = m_darkTheme ? QColor(241, 245, 249) : QColor(15, 23, 42);
-        const QColor highlightBg = m_darkTheme ? QColor(59, 130, 246, 75) : QColor(219, 234, 254);
+        const QColor primaryText = theme.textPrimary;
+        const QColor highlightBg = theme.brandPinkSelected;
 
         const QRectF nameRect(textLeft, rowRect.top() + 4.0, maxNameWidth, 20.0);
         if (matchStart >= 0 && matchLen > 0 && elidedName == fileName &&
@@ -412,6 +430,7 @@ public:
                           elidedDir);
 
         if (!dateStr.isEmpty()) {
+            painter->setPen(theme.textMuted);
             painter->drawText(QRectF(rightMargin - dateWidth, rowRect.top() + 23.0, dateWidth, 18.0),
                               Qt::AlignRight | Qt::AlignVCenter,
                               dateStr);
@@ -420,7 +439,7 @@ public:
         // 5. Third Line (when content snippet is available): Highlighted snippet
         if (!snippet.isEmpty()) {
             const QRectF snippetRect(textLeft, rowRect.top() + 42.0, availWidth, 19.0);
-            drawHighlightedSnippet(painter, snippetRect, snippet, m_darkTheme);
+            drawHighlightedSnippet(painter, snippetRect, snippet, theme);
         }
 
         painter->restore();
@@ -632,7 +651,7 @@ bool SearchPopupWidget::activateSelected() {
 int SearchPopupWidget::desiredPopupHeight() const noexcept {
     const int count = resultCount();
     if (count <= 0) {
-        return kHeaderHeight + 100;
+        return kHeaderHeight + 98;
     }
     const int visibleRows = qMin(count, kMaxVisibleRows);
     int rowsHeight = 0;
@@ -708,16 +727,19 @@ void SearchPopupWidget::mousePressEvent(QMouseEvent* event) {
 }
 
 void SearchPopupWidget::showContextMenuAt(const QPoint& localPos, const search::FileSearchResult& item) {
+    const auto theme = ThemeTokens::get(m_darkTheme);
     QMenu menu(this);
-    menu.setStyleSheet(m_darkTheme
-                           ? QStringLiteral("QMenu { background-color: #1E222A; color: #F1F5F9; border: 1px solid #384152; border-radius: 6px; padding: 4px; font-family: 'Segoe UI'; font-size: 9pt; }"
-                                            "QMenu::item { padding: 5px 20px 5px 12px; border-radius: 4px; }"
-                                            "QMenu::item:selected { background-color: #2563EB; color: #FFFFFF; }"
-                                            "QMenu::separator { height: 1px; background: #334155; margin: 4px 6px; }")
-                           : QStringLiteral("QMenu { background-color: #FFFFFF; color: #0F172A; border: 1px solid #CBD5E1; border-radius: 6px; padding: 4px; font-family: 'Segoe UI'; font-size: 9pt; }"
-                                            "QMenu::item { padding: 5px 20px 5px 12px; border-radius: 4px; }"
-                                            "QMenu::item:selected { background-color: #EFF6FF; color: #1D4ED8; }"
-                                            "QMenu::separator { height: 1px; background: #E2E8F0; margin: 4px 6px; }"));
+    menu.setStyleSheet(QStringLiteral(
+        "QMenu { background-color: %1; color: %2; border: 1px solid %3; border-radius: 8px; padding: 5px; font-family: 'Segoe UI'; font-size: 9pt; }"
+        "QMenu::item { padding: 6px 22px 6px 12px; border-radius: 5px; }"
+        "QMenu::item:selected { background-color: %4; color: %5; font-weight: 600; }"
+        "QMenu::separator { height: 1px; background: %6; margin: 4px 8px; }")
+        .arg(theme.surfaceBackground.name(),
+             theme.textPrimary.name(),
+             theme.borderColor.name(),
+             theme.brandPinkSelected.name(),
+             theme.brandPink.name(),
+             theme.borderSubtle.name()));
 
     QAction* openAct = menu.addAction(QStringLiteral("Open File\tEnter"));
     QAction* revealAct = menu.addAction(QStringLiteral("Reveal in File Explorer\tCtrl+Enter"));
@@ -759,46 +781,39 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.setRenderHint(QPainter::TextAntialiasing, true);
 
+    const auto theme = ThemeTokens::get(m_darkTheme);
     const QRectF bounds = QRectF(rect()).adjusted(1.0, 1.0, -1.0, -1.0);
-    const qreal cornerRadius = 11.0;
+    const qreal cornerRadius = 16.0;
 
-    // Subtle elevation shadow
+    // Soft elevated shadow
     painter.setPen(Qt::NoPen);
-    painter.setBrush(m_darkTheme ? QColor(0, 0, 0, 90) : QColor(15, 23, 42, 18));
-    painter.drawRoundedRect(bounds.adjusted(0.0, 1.5, 0.0, 1.5), cornerRadius, cornerRadius);
+    painter.setBrush(theme.shadowColor);
+    painter.drawRoundedRect(bounds.adjusted(0.0, 2.0, 0.0, 2.0), cornerRadius, cornerRadius);
 
     // Card surface and border
-    const QColor surfaceColor = m_darkTheme ? QColor(30, 34, 42, 248) : QColor(255, 255, 255, 252);
-    const QColor borderColor = m_darkTheme ? QColor(56, 65, 82) : QColor(218, 224, 233);
-    const QColor primaryText = m_darkTheme ? QColor(241, 245, 249) : QColor(30, 41, 59);
-    const QColor secondaryText = m_darkTheme ? QColor(148, 163, 184) : QColor(100, 116, 139);
-    const QColor badgeBg = m_darkTheme ? QColor(37, 99, 235, 38) : QColor(239, 246, 255);
-    const QColor badgeBorder = m_darkTheme ? QColor(59, 130, 246, 80) : QColor(191, 219, 254);
-    const QColor accentBlue = m_darkTheme ? QColor(96, 165, 250) : QColor(37, 99, 235);
-
-    QPen borderPen(borderColor, 1.0);
+    QPen borderPen(theme.borderColor, 1.0);
     painter.setPen(borderPen);
-    painter.setBrush(surfaceColor);
-    painter.drawRoundedRect(bounds.adjusted(0.0, 0.0, 0.0, -1.5), cornerRadius, cornerRadius);
+    painter.setBrush(theme.surfaceBackground);
+    painter.drawRoundedRect(bounds.adjusted(0.0, 0.0, 0.0, -1.0), cornerRadius, cornerRadius);
 
     // 1. Top Search Mode / Related Header Bar
     QFont pillFont(QStringLiteral("Segoe UI"), 8, QFont::DemiBold);
     painter.setFont(pillFont);
 
     if (!m_relatedSourceFileName.isEmpty()) {
-        painter.setPen(m_darkTheme ? QColor(196, 181, 253) : QColor(109, 40, 217));
+        painter.setPen(theme.brandPink);
         const QFontMetrics fm(pillFont);
         const QString banner = fm.elidedText(
             QStringLiteral("Similar to: %1").arg(m_relatedSourceFileName),
             Qt::ElideMiddle,
             width() - 95);
-        painter.drawText(QRectF(14.0, 6.0, width() - 95.0, 20.0), Qt::AlignLeft | Qt::AlignVCenter, banner);
+        painter.drawText(QRectF(14.0, 7.0, width() - 95.0, 20.0), Qt::AlignLeft | Qt::AlignVCenter, banner);
 
         const QRectF backRect = previewToggleRect();
         painter.setPen(Qt::NoPen);
-        painter.setBrush(m_darkTheme ? QColor(51, 65, 85) : QColor(241, 245, 249));
-        painter.drawRoundedRect(backRect, 5.0, 5.0);
-        painter.setPen(primaryText);
+        painter.setBrush(theme.elevatedBackground);
+        painter.drawRoundedRect(backRect, 6.0, 6.0);
+        painter.setPen(theme.textPrimary);
         painter.drawText(backRect, Qt::AlignCenter, QStringLiteral("× Back"));
     } else {
         static const QString kModeNames[4] = {
@@ -812,11 +827,11 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
             const bool active = (static_cast<int>(m_searchMode) == i);
             if (active) {
                 painter.setPen(Qt::NoPen);
-                painter.setBrush(m_darkTheme ? QColor(37, 99, 235, 90) : QColor(219, 234, 254));
-                painter.drawRoundedRect(pRect, 5.0, 5.0);
-                painter.setPen(m_darkTheme ? QColor(147, 197, 253) : QColor(29, 78, 216));
+                painter.setBrush(theme.brandPinkSelected);
+                painter.drawRoundedRect(pRect, 6.0, 6.0);
+                painter.setPen(theme.brandPink);
             } else {
-                painter.setPen(secondaryText);
+                painter.setPen(theme.textSecondary);
             }
             painter.drawText(pRect, Qt::AlignCenter, kModeNames[i]);
         }
@@ -825,39 +840,39 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
         const QRectF prevRect = previewToggleRect();
         if (m_previewVisible) {
             painter.setPen(Qt::NoPen);
-            painter.setBrush(m_darkTheme ? QColor(16, 185, 129, 65) : QColor(209, 250, 229));
-            painter.drawRoundedRect(prevRect, 5.0, 5.0);
-            painter.setPen(m_darkTheme ? QColor(110, 231, 183) : QColor(4, 120, 87));
+            painter.setBrush(theme.brandPinkTint);
+            painter.drawRoundedRect(prevRect, 6.0, 6.0);
+            painter.setPen(theme.brandPink);
         } else {
-            painter.setPen(QPen(m_darkTheme ? QColor(51, 65, 85) : QColor(226, 232, 240), 1.0));
-            painter.setBrush(Qt::NoBrush);
-            painter.drawRoundedRect(prevRect, 5.0, 5.0);
-            painter.setPen(secondaryText);
+            painter.setPen(QPen(theme.borderColor, 1.0));
+            painter.setBrush(theme.elevatedBackground);
+            painter.drawRoundedRect(prevRect, 6.0, 6.0);
+            painter.setPen(theme.textSecondary);
         }
         painter.drawText(prevRect, Qt::AlignCenter, QStringLiteral("Preview"));
     }
 
     // Header divider line
-    painter.setPen(QPen(m_darkTheme ? QColor(45, 53, 68) : QColor(241, 245, 249), 1.0));
-    painter.drawLine(QPointF(bounds.left() + 10.0, kHeaderHeight),
-                     QPointF(bounds.right() - 10.0, kHeaderHeight));
+    painter.setPen(QPen(theme.borderSubtle, 1.0));
+    painter.drawLine(QPointF(bounds.left() + 12.0, kHeaderHeight),
+                     QPointF(bounds.right() - 12.0, kHeaderHeight));
 
     // 2. Empty State
     if (resultCount() == 0) {
         const qreal emptyTop = kHeaderHeight + 14.0;
         const QRectF iconCircle(bounds.left() + 18.0, emptyTop + 4.0, 32.0, 32.0);
-        painter.setPen(QPen(badgeBorder, 1.0));
-        painter.setBrush(badgeBg);
+        painter.setPen(QPen(theme.brandPinkBorder, 1.0));
+        painter.setBrush(theme.brandPinkTint);
         painter.drawEllipse(iconCircle);
 
         QFont badgeFont(QStringLiteral("Segoe UI"), 10, QFont::DemiBold);
         painter.setFont(badgeFont);
-        painter.setPen(accentBlue);
+        painter.setPen(theme.brandPink);
         painter.drawText(iconCircle, Qt::AlignCenter, QStringLiteral("i"));
 
         QFont titleFont(QStringLiteral("Segoe UI"), 10, QFont::DemiBold);
         painter.setFont(titleFont);
-        painter.setPen(primaryText);
+        painter.setPen(theme.textPrimary);
         const QRectF titleRect(iconCircle.right() + 14.0,
                                emptyTop,
                                bounds.width() - (iconCircle.right() - bounds.left()) - 18.0,
@@ -866,7 +881,7 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
 
         QFont subFont(QStringLiteral("Segoe UI"), 8.5, QFont::Normal);
         painter.setFont(subFont);
-        painter.setPen(secondaryText);
+        painter.setPen(theme.textSecondary);
         const QRectF subRect(iconCircle.right() + 14.0,
                              titleRect.bottom() + 1.0,
                              titleRect.width(),
@@ -883,48 +898,48 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
     const qreal footerTop = bounds.bottom() - kFooterHeight - 1.0;
     if (m_previewVisible && resultCount() > 0) {
         const qreal previewTop = footerTop - kPreviewHeight;
-        painter.setPen(QPen(m_darkTheme ? QColor(45, 53, 68) : QColor(226, 232, 240), 1.0));
-        painter.drawLine(QPointF(bounds.left() + 10.0, previewTop),
-                         QPointF(bounds.right() - 10.0, previewTop));
+        painter.setPen(QPen(theme.borderSubtle, 1.0));
+        painter.drawLine(QPointF(bounds.left() + 12.0, previewTop),
+                         QPointF(bounds.right() - 12.0, previewTop));
 
-        const QRectF prevBox(bounds.left() + 10.0, previewTop + 6.0, bounds.width() - 20.0, kPreviewHeight - 12.0);
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(m_darkTheme ? QColor(22, 26, 34, 210) : QColor(248, 250, 252));
-        painter.drawRoundedRect(prevBox, 7.0, 7.0);
+        const QRectF prevBox(bounds.left() + 12.0, previewTop + 6.0, bounds.width() - 24.0, kPreviewHeight - 12.0);
+        painter.setPen(QPen(theme.borderColor, 1.0));
+        painter.setBrush(theme.elevatedBackground);
+        painter.drawRoundedRect(prevBox, 8.0, 8.0);
 
         if (const auto* sel = selectedResult()) {
-            QFont hdrFont(QStringLiteral("Segoe UI"), 8, QFont::DemiBold);
+            QFont hdrFont(QStringLiteral("Segoe UI"), 8.5, QFont::DemiBold);
             painter.setFont(hdrFont);
-            painter.setPen(primaryText);
+            painter.setPen(theme.textPrimary);
             const QFontMetrics fmHdr(hdrFont);
             const QString nativePath = QDir::toNativeSeparators(sel->path);
             const QString elidedPath = fmHdr.elidedText(nativePath, Qt::ElideMiddle, static_cast<int>(prevBox.width() - 16.0));
-            painter.drawText(QRectF(prevBox.left() + 8.0, prevBox.top() + 4.0, prevBox.width() - 16.0, 16.0),
+            painter.drawText(QRectF(prevBox.left() + 10.0, prevBox.top() + 6.0, prevBox.width() - 20.0, 16.0),
                              Qt::AlignLeft | Qt::AlignVCenter,
                              elidedPath);
 
             QFont bodyFont(QStringLiteral("Segoe UI"), 8, QFont::Normal);
             painter.setFont(bodyFont);
-            painter.setPen(secondaryText);
+            painter.setPen(theme.textSecondary);
             const QString body = m_previewText.isEmpty()
                                      ? (sel->snippet.isEmpty() ? QStringLiteral("No text preview available.") : sel->snippet)
                                      : m_previewText;
             QString cleanBody = body;
             cleanBody.replace(QChar(0x00AB), QString());
             cleanBody.replace(QChar(0x00BB), QString());
-            painter.drawText(QRectF(prevBox.left() + 8.0, prevBox.top() + 22.0, prevBox.width() - 16.0, prevBox.height() - 26.0),
+            painter.drawText(QRectF(prevBox.left() + 10.0, prevBox.top() + 24.0, prevBox.width() - 20.0, prevBox.height() - 28.0),
                              Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
                              cleanBody);
         }
     }
 
     // 4. Bottom divider & status footer bar
-    painter.setPen(QPen(m_darkTheme ? QColor(45, 53, 68) : QColor(241, 245, 249), 1.0));
+    painter.setPen(QPen(theme.borderSubtle, 1.0));
     painter.drawLine(QPointF(bounds.left() + 12.0, footerTop), QPointF(bounds.right() - 12.0, footerTop));
 
     QFont footerFont(QStringLiteral("Segoe UI"), 8, QFont::Normal);
     painter.setFont(footerFont);
-    painter.setPen(secondaryText);
+    painter.setPen(theme.textSecondary);
     const QRectF footerRect(bounds.left() + 14.0, footerTop + 1.0, bounds.width() - 28.0, kFooterHeight - 2.0);
 
     QString leftFooter = QStringLiteral("UshaLabs Lumen • Offline Mode");
@@ -939,6 +954,7 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
     const QString rightFooter = (resultCount() > 0)
                                     ? QStringLiteral("Tab Mode  •  ^P Preview  •  ↵ Open")
                                     : QStringLiteral("Esc to close");
+    painter.setPen(theme.textMuted);
     painter.drawText(footerRect, Qt::AlignRight | Qt::AlignVCenter, rightFooter);
 }
 

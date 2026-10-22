@@ -18,8 +18,8 @@ class DesktopSearchBar : public QWidget {
     Q_OBJECT
 
 public:
-    static constexpr int kBarWidth = 400;
-    static constexpr int kBarHeight = 50;
+    static constexpr int kBarWidth = 460;
+    static constexpr int kBarHeight = 52;
     static constexpr int kPopupGap = 6;
     static constexpr int kPopupHeight = 132;
     static constexpr int kExpandedHeight = kBarHeight + kPopupGap + kPopupHeight;

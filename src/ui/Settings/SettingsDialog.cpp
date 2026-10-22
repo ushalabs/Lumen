@@ -94,14 +94,19 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     indexLayout->addLayout(folderBtnRow);
 
     m_dbStatusLabel = new QLabel(indexGroup);
-    m_dbStatusLabel->setStyleSheet(QStringLiteral("color: #475569; font-size: 8.5pt;"));
+    m_dbStatusLabel->setStyleSheet(QStringLiteral("color: #64748B; font-size: 8.5pt;"));
     m_dbStatusLabel->setWordWrap(true);
     indexLayout->addWidget(m_dbStatusLabel);
 
     mainLayout->addWidget(indexGroup);
 
-    // 3. Dialog buttons
+    // 3. Dialog footer with UshaLabs signature & action buttons
     auto* btnRow = new QHBoxLayout();
+    auto* signature = new QLabel(
+        QStringLiteral("<span style='font-size:16px;font-weight:600;font-style:italic;color:#172033'>Usha</span><span style='font-size:16px;font-weight:600;font-style:italic;color:#EC1680'>Labs</span>"),
+        this);
+    signature->setTextFormat(Qt::RichText);
+    btnRow->addWidget(signature);
     btnRow->addStretch();
 
     auto* cancelBtn = new QPushButton(QStringLiteral("Cancel"), this);
@@ -114,6 +119,26 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     btnRow->addWidget(cancelBtn);
     btnRow->addWidget(saveBtn);
     mainLayout->addLayout(btnRow);
+
+    setStyleSheet(QStringLiteral(
+        "QDialog { background-color: #F8F9FD; font-family: 'Segoe UI'; font-size: 9pt; color: #172033; }"
+        "QGroupBox { font-weight: 600; font-size: 9.5pt; color: #172033; border: 1px solid #DCE1EC; border-radius: 10px; margin-top: 10px; padding-top: 14px; background: #FFFFFF; }"
+        "QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 14px; padding: 0 4px; background: transparent; }"
+        "QPushButton { background: #FFFFFF; border: 1px solid #DCE1EC; border-radius: 8px; padding: 6px 14px; font-weight: 600; color: #172033; min-height: 20px; }"
+        "QPushButton:hover { background: #FDF2F8; border-color: #EC1680; color: #EC1680; }"
+        "QPushButton:pressed { background: #FBE4EF; }"
+        "QPushButton:default { background: #EC1680; color: #FFFFFF; border-color: #EC1680; }"
+        "QPushButton:default:hover { background: #D90C70; }"
+        "QPushButton:default:pressed { background: #BA0B62; }"
+        "QLineEdit, QComboBox { background: #FFFFFF; border: 1px solid #DCE1EC; border-radius: 8px; padding: 5px 8px; color: #172033; selection-background-color: #EC1680; selection-color: white; }"
+        "QLineEdit:focus, QComboBox:focus { border-color: #EC1680; }"
+        "QCheckBox { spacing: 8px; font-size: 9pt; color: #172033; }"
+        "QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #DCE1EC; background: #FFFFFF; }"
+        "QCheckBox::indicator:hover { border-color: #EC1680; }"
+        "QCheckBox::indicator:checked { background: #EC1680; border-color: #EC1680; }"
+        "QListWidget { background: #FAFBFD; border: 1px solid #DCE1EC; border-radius: 8px; padding: 4px; color: #172033; }"
+        "QListWidget::item { padding: 4px; border-radius: 4px; }"
+        "QListWidget::item:selected { background: #FBE4EF; color: #EC1680; }"));
 
     loadFromSettings();
 }
