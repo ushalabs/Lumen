@@ -4,6 +4,7 @@
 
 #include <QAbstractListModel>
 #include <QListView>
+#include <QRectF>
 #include <QString>
 #include <QVector>
 #include <QWidget>
@@ -24,7 +25,8 @@ public:
         MatchLengthRole,
         SnippetRole,
         MatchedPageRole,
-        MatchTypeRole
+        MatchTypeRole,
+        IsPinnedRole
     };
 
     explicit SearchResultListModel(QObject* parent = nullptr);
@@ -48,8 +50,10 @@ class SearchPopupWidget : public QWidget {
     Q_OBJECT
 
 public:
+    static constexpr int kHeaderHeight = 32;
     static constexpr int kRowHeight = 52;
     static constexpr int kContentRowHeight = 70;
+    static constexpr int kPreviewHeight = 112;
     static constexpr int kFooterHeight = 28;
     static constexpr int kMaxVisibleRows = 6;
 
@@ -61,6 +65,20 @@ public:
 
     void setSearchResults(QVector<search::FileSearchResult> results, double elapsedMs);
     void clearResults();
+
+    void setSearchMode(search::SearchMode mode);
+    search::SearchMode searchMode() const noexcept { return m_searchMode; }
+    void cycleSearchMode(bool forward = true);
+
+    void setPreviewVisible(bool visible);
+    bool isPreviewVisible() const noexcept { return m_previewVisible; }
+    void togglePreview();
+
+    void setPreviewText(const QString& text);
+    QString previewText() const { return m_previewText; }
+
+    void setRelatedSourceFileName(const QString& fileName);
+    QString relatedSourceFileName() const { return m_relatedSourceFileName; }
 
     void setIndexingInProgress(bool indexing);
     bool isIndexingInProgress() const noexcept { return m_indexingInProgress; }
@@ -81,16 +99,32 @@ public:
 
 signals:
     void resultActivated(const lumen::search::FileSearchResult& result);
+    void revealInExplorerRequested(const lumen::search::FileSearchResult& result);
+    void copyPathRequested(const lumen::search::FileSearchResult& result);
+    void findRelatedRequested(const lumen::search::FileSearchResult& result);
+    void togglePinRequested(const lumen::search::FileSearchResult& result);
+    void searchModeChanged(lumen::search::SearchMode mode);
+    void previewVisibilityChanged(bool visible);
+    void selectedResultChanged(const lumen::search::FileSearchResult& result);
+    void exitRelatedModeRequested();
 
 protected:
     void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
 
 private:
     void updateListLayout();
+    void showContextMenuAt(const QPoint& localPos, const search::FileSearchResult& item);
+    QRectF modePillRect(int modeIndex) const;
+    QRectF previewToggleRect() const;
 
     QString m_queryText;
+    QString m_previewText;
+    QString m_relatedSourceFileName;
     double m_lastQueryMs = 0.0;
+    search::SearchMode m_searchMode = search::SearchMode::All;
+    bool m_previewVisible = false;
     bool m_darkTheme = false;
     bool m_indexingInProgress = false;
 

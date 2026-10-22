@@ -74,6 +74,7 @@ QStringList SettingsManager::defaultIgnoredDirectories() {
 
 void SettingsManager::resetToDefaultsUnlocked() {
     m_desktopBarVisible = true;
+    m_alwaysOnTopMode = false;
     m_hasCustomPosition = false;
     m_desktopBarPos = QPoint(0, 0);
     m_startWithWindows = false;
@@ -84,7 +85,12 @@ void SettingsManager::resetToDefaultsUnlocked() {
     m_indexing.ignoredDirectories = defaultIgnoredDirectories();
     m_indexing.maxDocumentSizeMb = 10;
     m_indexing.maxContentIndexedFiles = 5000;
+    m_indexing.enableContentIndexing = true;
+    m_indexing.enableSemanticIndexing = true;
     m_indexing.indexingPaused = false;
+
+    m_pinnedFiles.clear();
+    m_recentSearches.clear();
 }
 
 bool SettingsManager::load(const QString& filePath) {
@@ -117,6 +123,7 @@ bool SettingsManager::load(const QString& filePath) {
 
     const QJsonObject root = doc.object();
     m_desktopBarVisible = root.value(QStringLiteral("desktopBarVisible")).toBool(true);
+    m_alwaysOnTopMode = root.value(QStringLiteral("alwaysOnTopMode")).toBool(false);
     m_hasCustomPosition = root.value(QStringLiteral("hasCustomPosition")).toBool(false);
 
     if (root.contains(QStringLiteral("desktopBarPosition")) && root.value(QStringLiteral("desktopBarPosition")).isObject()) {
@@ -128,6 +135,27 @@ bool SettingsManager::load(const QString& filePath) {
     m_startWithWindows = root.value(QStringLiteral("startWithWindows")).toBool(false);
     m_appearancePreference = root.value(QStringLiteral("appearancePreference")).toString(QStringLiteral("light"));
     m_globalShortcut = root.value(QStringLiteral("globalShortcut")).toString(QStringLiteral("Ctrl+Alt+Space"));
+
+    if (root.contains(QStringLiteral("pinnedFiles")) && root.value(QStringLiteral("pinnedFiles")).isArray()) {
+        const QJsonArray arr = root.value(QStringLiteral("pinnedFiles")).toArray();
+        for (const QJsonValue& val : arr) {
+            if (val.isString() && !val.toString().trimmed().isEmpty()) {
+                m_pinnedFiles.append(QDir::toNativeSeparators(val.toString().trimmed()));
+            }
+        }
+    }
+
+    if (root.contains(QStringLiteral("recentSearches")) && root.value(QStringLiteral("recentSearches")).isArray()) {
+        const QJsonArray arr = root.value(QStringLiteral("recentSearches")).toArray();
+        for (const QJsonValue& val : arr) {
+            if (val.isString() && !val.toString().trimmed().isEmpty()) {
+                m_recentSearches.append(val.toString().trimmed());
+                if (m_recentSearches.size() >= kMaxRecentSearches) {
+                    break;
+                }
+            }
+        }
+    }
 
     if (root.contains(QStringLiteral("indexing")) && root.value(QStringLiteral("indexing")).isObject()) {
         const QJsonObject idxObj = root.value(QStringLiteral("indexing")).toObject();
@@ -160,6 +188,8 @@ bool SettingsManager::load(const QString& filePath) {
 
         m_indexing.maxDocumentSizeMb = idxObj.value(QStringLiteral("maxDocumentSizeMb")).toInt(10);
         m_indexing.maxContentIndexedFiles = idxObj.value(QStringLiteral("maxContentIndexedFiles")).toInt(5000);
+        m_indexing.enableContentIndexing = idxObj.value(QStringLiteral("enableContentIndexing")).toBool(true);
+        m_indexing.enableSemanticIndexing = idxObj.value(QStringLiteral("enableSemanticIndexing")).toBool(true);
         m_indexing.indexingPaused = idxObj.value(QStringLiteral("indexingPaused")).toBool(false);
     }
 
@@ -195,16 +225,31 @@ bool SettingsManager::save() const {
     idxObj.insert(QStringLiteral("ignoredDirectories"), ignoredArr);
     idxObj.insert(QStringLiteral("maxDocumentSizeMb"), m_indexing.maxDocumentSizeMb);
     idxObj.insert(QStringLiteral("maxContentIndexedFiles"), m_indexing.maxContentIndexedFiles);
+    idxObj.insert(QStringLiteral("enableContentIndexing"), m_indexing.enableContentIndexing);
+    idxObj.insert(QStringLiteral("enableSemanticIndexing"), m_indexing.enableSemanticIndexing);
     idxObj.insert(QStringLiteral("indexingPaused"), m_indexing.indexingPaused);
 
+    QJsonArray pinnedArr;
+    for (const QString& p : m_pinnedFiles) {
+        pinnedArr.append(p);
+    }
+
+    QJsonArray recentArr;
+    for (const QString& r : m_recentSearches) {
+        recentArr.append(r);
+    }
+
     QJsonObject root;
-    root.insert(QStringLiteral("schemaVersion"), 1);
+    root.insert(QStringLiteral("schemaVersion"), 2);
     root.insert(QStringLiteral("desktopBarVisible"), m_desktopBarVisible);
+    root.insert(QStringLiteral("alwaysOnTopMode"), m_alwaysOnTopMode);
     root.insert(QStringLiteral("hasCustomPosition"), m_hasCustomPosition);
     root.insert(QStringLiteral("desktopBarPosition"), posObj);
     root.insert(QStringLiteral("startWithWindows"), m_startWithWindows);
     root.insert(QStringLiteral("appearancePreference"), m_appearancePreference);
     root.insert(QStringLiteral("globalShortcut"), m_globalShortcut);
+    root.insert(QStringLiteral("pinnedFiles"), pinnedArr);
+    root.insert(QStringLiteral("recentSearches"), recentArr);
     root.insert(QStringLiteral("indexing"), idxObj);
 
     QSaveFile saveFile(targetPath);
@@ -231,6 +276,21 @@ void SettingsManager::setDesktopBarVisible(bool visible, bool persistImmediately
     {
         QMutexLocker locker(&m_mutex);
         m_desktopBarVisible = visible;
+    }
+    if (persistImmediately) {
+        save();
+    }
+}
+
+bool SettingsManager::alwaysOnTopMode() const {
+    QMutexLocker locker(&m_mutex);
+    return m_alwaysOnTopMode;
+}
+
+void SettingsManager::setAlwaysOnTopMode(bool enabled, bool persistImmediately) {
+    {
+        QMutexLocker locker(&m_mutex);
+        m_alwaysOnTopMode = enabled;
     }
     if (persistImmediately) {
         save();
@@ -331,6 +391,91 @@ void SettingsManager::setIndexingSettings(const IndexingSettingsPlaceholder& ind
     {
         QMutexLocker locker(&m_mutex);
         m_indexing = indexing;
+    }
+    if (persistImmediately) {
+        save();
+    }
+}
+
+QStringList SettingsManager::pinnedFiles() const {
+    QMutexLocker locker(&m_mutex);
+    return m_pinnedFiles;
+}
+
+bool SettingsManager::isFilePinned(const QString& path) const {
+    const QString norm = QDir::toNativeSeparators(path.trimmed());
+    if (norm.isEmpty()) {
+        return false;
+    }
+    QMutexLocker locker(&m_mutex);
+    for (const QString& p : m_pinnedFiles) {
+        if (p.compare(norm, Qt::CaseInsensitive) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool SettingsManager::togglePinnedFile(const QString& path, bool persistImmediately) {
+    const QString norm = QDir::toNativeSeparators(path.trimmed());
+    if (norm.isEmpty()) {
+        return false;
+    }
+    bool nowPinned = false;
+    {
+        QMutexLocker locker(&m_mutex);
+        int foundIdx = -1;
+        for (int i = 0; i < m_pinnedFiles.size(); ++i) {
+            if (m_pinnedFiles[i].compare(norm, Qt::CaseInsensitive) == 0) {
+                foundIdx = i;
+                break;
+            }
+        }
+        if (foundIdx >= 0) {
+            m_pinnedFiles.removeAt(foundIdx);
+            nowPinned = false;
+        } else {
+            m_pinnedFiles.prepend(norm);
+            nowPinned = true;
+        }
+    }
+    if (persistImmediately) {
+        save();
+    }
+    return nowPinned;
+}
+
+QStringList SettingsManager::recentSearches() const {
+    QMutexLocker locker(&m_mutex);
+    return m_recentSearches;
+}
+
+void SettingsManager::addRecentSearch(const QString& query, bool persistImmediately) {
+    const QString trimmed = query.trimmed();
+    if (trimmed.isEmpty()) {
+        return;
+    }
+    {
+        QMutexLocker locker(&m_mutex);
+        for (int i = m_recentSearches.size() - 1; i >= 0; --i) {
+            if (m_recentSearches[i].compare(trimmed, Qt::CaseInsensitive) == 0) {
+                m_recentSearches.removeAt(i);
+            }
+        }
+        m_recentSearches.prepend(trimmed);
+        while (m_recentSearches.size() > kMaxRecentSearches) {
+            m_recentSearches.removeLast();
+        }
+    }
+    if (persistImmediately) {
+        save();
+    }
+}
+
+void SettingsManager::clearRecentSearches(bool persistImmediately) {
+    {
+        QMutexLocker locker(&m_mutex);
+        m_recentSearches.clear();
     }
     if (persistImmediately) {
         save();

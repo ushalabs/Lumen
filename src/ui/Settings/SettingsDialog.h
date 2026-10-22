@@ -19,18 +19,27 @@ public:
 signals:
     void settingsApplied();
     void resetPositionRequested();
+    void rebuildIndexRequested();
 
 private slots:
     void onSaveClicked();
     void onResetPositionClicked();
+    void onAddFolderClicked();
+    void onRemoveFolderClicked();
+    void onRebuildIndexClicked();
 
 private:
     void loadFromSettings();
+    void refreshDbStatusLabel();
 
     QCheckBox* m_desktopBarVisibleCheck = nullptr;
+    QCheckBox* m_alwaysOnTopCheck = nullptr;
     QCheckBox* m_startWithWindowsCheck = nullptr;
     QComboBox* m_appearanceCombo = nullptr;
     QLineEdit* m_shortcutEdit = nullptr;
+
+    QCheckBox* m_enableContentCheck = nullptr;
+    QCheckBox* m_enableSemanticCheck = nullptr;
     QListWidget* m_watchedFoldersList = nullptr;
     QLabel* m_dbStatusLabel = nullptr;
 };

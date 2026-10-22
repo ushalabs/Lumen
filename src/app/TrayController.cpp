@@ -2,6 +2,7 @@
 
 #include "core/Logger.h"
 #include "core/SettingsManager.h"
+#include "database/DatabaseManager.h"
 #include "indexing/FileIndexer.h"
 #include "ui/BrandingIcon.h"
 #include "ui/DesktopSearchBar/DesktopSearchBar.h"
@@ -145,6 +146,20 @@ void TrayController::onSettingsTriggered() {
         }
     });
 
+    connect(dialog, &ui::SettingsDialog::rebuildIndexRequested, this, [this]() {
+        database::DatabaseManager::instance().clearAllFiles();
+        if (m_fileIndexer != nullptr) {
+            const auto idxSettings = core::SettingsManager::instance().indexingSettings();
+            m_fileIndexer->startBackgroundIndexing(
+                idxSettings.watchedFolders,
+                idxSettings.ignoredDirectories,
+                idxSettings.enableContentIndexing,
+                idxSettings.maxContentIndexedFiles,
+                static_cast<qint64>(idxSettings.maxDocumentSizeMb) * 1024LL * 1024LL,
+                idxSettings.enableSemanticIndexing);
+        }
+    });
+
     connect(dialog, &ui::SettingsDialog::settingsApplied, this, [this]() {
         syncStateFromSettings();
         if (m_searchBar != nullptr) {
@@ -155,6 +170,17 @@ void TrayController::onSettingsTriggered() {
             } else {
                 m_searchBar->hide();
             }
+        }
+        if (m_fileIndexer != nullptr) {
+            const auto idxSettings = core::SettingsManager::instance().indexingSettings();
+            m_fileIndexer->setPaused(idxSettings.indexingPaused);
+            m_fileIndexer->startBackgroundIndexing(
+                idxSettings.watchedFolders,
+                idxSettings.ignoredDirectories,
+                idxSettings.enableContentIndexing,
+                idxSettings.maxContentIndexedFiles,
+                static_cast<qint64>(idxSettings.maxDocumentSizeMb) * 1024LL * 1024LL,
+                idxSettings.enableSemanticIndexing);
         }
     });
 

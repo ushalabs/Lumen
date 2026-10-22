@@ -74,11 +74,17 @@ bool LumenApplication::initialize(bool startBackgroundIndexer) {
     if (startBackgroundIndexer) {
         const auto idxSettings = core::SettingsManager::instance().indexingSettings();
         m_fileIndexer->setPaused(idxSettings.indexingPaused);
-        m_fileIndexer->startBackgroundIndexing(idxSettings.watchedFolders, idxSettings.ignoredDirectories);
+        m_fileIndexer->startBackgroundIndexing(
+            idxSettings.watchedFolders,
+            idxSettings.ignoredDirectories,
+            idxSettings.enableContentIndexing,
+            idxSettings.maxContentIndexedFiles,
+            static_cast<qint64>(idxSettings.maxDocumentSizeMb) * 1024LL * 1024LL,
+            idxSettings.enableSemanticIndexing);
     }
 
     m_initialized = true;
-    core::Logger::info(QStringLiteral("App"), QStringLiteral("Phase 2 initialization complete."));
+    core::Logger::info(QStringLiteral("App"), QStringLiteral("Lumen initialization complete."));
     return true;
 }
 

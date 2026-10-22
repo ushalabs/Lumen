@@ -2,16 +2,21 @@
 
 #include "core/AppPaths.h"
 #include "core/Logger.h"
+#include "core/SettingsManager.h"
 #include "database/DatabaseManager.h"
 #include "extraction/DocumentExtractor.h"
 #include "semantic/SemanticEmbeddingEngine.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QImageReader>
 #include <QMutexLocker>
 #include <QRegularExpression>
+#include <QSet>
 
 #include <algorithm>
 #include <cmath>
@@ -217,6 +222,181 @@ double FileSearchEngine::computeFilenameScore(const QString& fileName,
     return score;
 }
 
+SearchFilters FileSearchEngine::filtersForSearchMode(SearchMode mode,
+                                                     const SearchFilters& baseFilters) {
+    SearchFilters f = baseFilters;
+    switch (mode) {
+        case SearchMode::All:
+            f.includeFilenameMatches = true;
+            f.includeContentMatches = true;
+            f.includeSemanticMatches = true;
+            break;
+        case SearchMode::Files:
+            f.includeFilenameMatches = true;
+            f.includeContentMatches = false;
+            f.includeSemanticMatches = false;
+            break;
+        case SearchMode::Content:
+            f.includeFilenameMatches = false;
+            f.includeContentMatches = true;
+            f.includeSemanticMatches = false;
+            break;
+        case SearchMode::Semantic:
+            f.includeFilenameMatches = false;
+            f.includeContentMatches = false;
+            f.includeSemanticMatches = true;
+            break;
+    }
+    return f;
+}
+
+QString FileSearchEngine::parseInlineQueryAndFilters(const QString& rawQuery,
+                                                     const SearchFilters& baseFilters,
+                                                     SearchFilters* outFilters) {
+    SearchFilters active = baseFilters;
+    QStringList remainingWords;
+
+    auto parseSizeBytes = [](const QString& valStr) -> qint64 {
+        QString s = valStr.trimmed().toLower();
+        qint64 mult = 1;
+        if (s.endsWith(QStringLiteral("gb"))) {
+            mult = 1024LL * 1024LL * 1024LL;
+            s.chop(2);
+        } else if (s.endsWith(QStringLiteral("mb"))) {
+            mult = 1024LL * 1024LL;
+            s.chop(2);
+        } else if (s.endsWith(QStringLiteral("kb"))) {
+            mult = 1024LL;
+            s.chop(2);
+        } else if (s.endsWith(QLatin1Char('b'))) {
+            s.chop(1);
+        }
+        bool ok = false;
+        const double num = s.toDouble(&ok);
+        return (ok && num >= 0.0) ? static_cast<qint64>(num * static_cast<double>(mult)) : -1;
+    };
+
+    const QStringList parts = rawQuery.trimmed().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    for (const QString& part : parts) {
+        if (part.startsWith(QStringLiteral("ext:"), Qt::CaseInsensitive) && part.size() > 4) {
+            const QStringList exts = part.mid(4).split(QLatin1Char(','), Qt::SkipEmptyParts);
+            for (QString ext : exts) {
+                ext = ext.trimmed().toLower();
+                if (ext.startsWith(QLatin1Char('.'))) {
+                    ext.remove(0, 1);
+                }
+                if (!ext.isEmpty()) {
+                    active.extensions.append(ext);
+                }
+            }
+            continue;
+        }
+        if (part.startsWith(QStringLiteral("type:"), Qt::CaseInsensitive) && part.size() > 5) {
+            const QString t = part.mid(5).trimmed().toLower();
+            if (t == QStringLiteral("doc") || t == QStringLiteral("docs") || t == QStringLiteral("document")) {
+                active.extensions.append({QStringLiteral("pdf"), QStringLiteral("docx"), QStringLiteral("doc"),
+                                          QStringLiteral("txt"), QStringLiteral("md"), QStringLiteral("rtf")});
+            } else if (t == QStringLiteral("code")) {
+                active.extensions.append({QStringLiteral("cpp"), QStringLiteral("h"), QStringLiteral("hpp"),
+                                          QStringLiteral("c"), QStringLiteral("py"), QStringLiteral("js"),
+                                          QStringLiteral("ts"), QStringLiteral("json"), QStringLiteral("rs"),
+                                          QStringLiteral("go"), QStringLiteral("cs")});
+            } else if (t == QStringLiteral("image") || t == QStringLiteral("img")) {
+                active.extensions.append({QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("jpeg"),
+                                          QStringLiteral("svg"), QStringLiteral("webp"), QStringLiteral("bmp"),
+                                          QStringLiteral("ico"), QStringLiteral("gif")});
+            } else if (t == QStringLiteral("sheet") || t == QStringLiteral("spreadsheet")) {
+                active.extensions.append({QStringLiteral("xlsx"), QStringLiteral("xls"), QStringLiteral("csv")});
+            }
+            continue;
+        }
+        if ((part.startsWith(QStringLiteral("in:"), Qt::CaseInsensitive) && part.size() > 3) ||
+            (part.startsWith(QStringLiteral("folder:"), Qt::CaseInsensitive) && part.size() > 7)) {
+            const int colonIdx = part.indexOf(QLatin1Char(':'));
+            const QString folderToken = QDir::toNativeSeparators(part.mid(colonIdx + 1).trimmed());
+            if (!folderToken.isEmpty()) {
+                active.pathPrefix = folderToken;
+            }
+            continue;
+        }
+        if (part.startsWith(QStringLiteral("size:"), Qt::CaseInsensitive) && part.size() > 5) {
+            const QString expr = part.mid(5).trimmed();
+            if (expr.startsWith(QLatin1Char('>'))) {
+                const qint64 b = parseSizeBytes(expr.mid(1));
+                if (b >= 0) {
+                    active.minSizeBytes = b;
+                }
+            } else if (expr.startsWith(QLatin1Char('<'))) {
+                const qint64 b = parseSizeBytes(expr.mid(1));
+                if (b >= 0) {
+                    active.maxSizeBytes = b;
+                }
+            }
+            continue;
+        }
+        if (part.startsWith(QStringLiteral("modified:"), Qt::CaseInsensitive) && part.size() > 9) {
+            const QString mod = part.mid(9).trimmed().toLower();
+            const qint64 now = QDateTime::currentSecsSinceEpoch();
+            if (mod == QStringLiteral("today") || mod == QStringLiteral("1d") || mod == QStringLiteral("24h")) {
+                active.modifiedAfterEpoch = now - 86400;
+            } else if (mod == QStringLiteral("week") || mod == QStringLiteral("7d")) {
+                active.modifiedAfterEpoch = now - 7 * 86400;
+            } else if (mod == QStringLiteral("month") || mod == QStringLiteral("30d")) {
+                active.modifiedAfterEpoch = now - 30 * 86400;
+            } else if (mod == QStringLiteral("year") || mod == QStringLiteral("365d")) {
+                active.modifiedAfterEpoch = now - 365 * 86400;
+            }
+            continue;
+        }
+        if (part.startsWith(QStringLiteral("mode:"), Qt::CaseInsensitive) && part.size() > 5) {
+            const QString m = part.mid(5).trimmed().toLower();
+            if (m == QStringLiteral("files") || m == QStringLiteral("file")) {
+                active = filtersForSearchMode(SearchMode::Files, active);
+            } else if (m == QStringLiteral("content")) {
+                active = filtersForSearchMode(SearchMode::Content, active);
+            } else if (m == QStringLiteral("semantic") || m == QStringLiteral("sem")) {
+                active = filtersForSearchMode(SearchMode::Semantic, active);
+            } else if (m == QStringLiteral("all")) {
+                active = filtersForSearchMode(SearchMode::All, active);
+            }
+            continue;
+        }
+        if (part.startsWith(QStringLiteral("file:"), Qt::CaseInsensitive)) {
+            active = filtersForSearchMode(SearchMode::Files, active);
+            const QString rest = part.mid(5).trimmed();
+            if (!rest.isEmpty()) {
+                remainingWords.append(rest);
+            }
+            continue;
+        }
+        if (part.startsWith(QStringLiteral("content:"), Qt::CaseInsensitive)) {
+            active = filtersForSearchMode(SearchMode::Content, active);
+            const QString rest = part.mid(8).trimmed();
+            if (!rest.isEmpty()) {
+                remainingWords.append(rest);
+            }
+            continue;
+        }
+        if (part.startsWith(QStringLiteral("sem:"), Qt::CaseInsensitive) ||
+            part.startsWith(QStringLiteral("semantic:"), Qt::CaseInsensitive)) {
+            active = filtersForSearchMode(SearchMode::Semantic, active);
+            const int colonIdx = part.indexOf(QLatin1Char(':'));
+            const QString rest = part.mid(colonIdx + 1).trimmed();
+            if (!rest.isEmpty()) {
+                remainingWords.append(rest);
+            }
+            continue;
+        }
+
+        remainingWords.append(part);
+    }
+
+    if (outFilters != nullptr) {
+        *outFilters = active;
+    }
+    return remainingWords.join(QLatin1Char(' '));
+}
+
 QVector<FileSearchResult> FileSearchEngine::searchFiles(
     const QString& query,
     const SearchFilters& filters,
@@ -240,22 +420,14 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
     }
 
     SearchFilters activeFilters = filters;
+    const QString cleanedQuery = parseInlineQueryAndFilters(trimmedQuery, filters, &activeFilters);
+
     QStringList queryTokensLower;
     QStringList ftsTrigTokens;
     QStringList ftsDocTokens;
 
-    const QStringList rawParts = trimmedQuery.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    const QStringList rawParts = cleanedQuery.split(QLatin1Char(' '), Qt::SkipEmptyParts);
     for (const QString& part : rawParts) {
-        if (part.startsWith(QStringLiteral("ext:"), Qt::CaseInsensitive) && part.size() > 4) {
-            QString ext = part.mid(4).trimmed().toLower();
-            if (ext.startsWith(QLatin1Char('.'))) {
-                ext.remove(0, 1);
-            }
-            if (!ext.isEmpty()) {
-                activeFilters.extensions.append(ext);
-            }
-            continue;
-        }
         const QString lowerPart = part.toLower();
         queryTokensLower.append(lowerPart);
         if (lowerPart.size() >= 3) {
@@ -269,9 +441,7 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
         }
     }
 
-    const QString effectiveQueryLower = queryTokensLower.isEmpty()
-                                            ? trimmedQuery.toLower()
-                                            : queryTokensLower.join(QLatin1Char(' '));
+    const QString effectiveQueryLower = queryTokensLower.join(QLatin1Char(' '));
 
     QMutexLocker locker(&m_readMutex);
     if (!ensureReadConnectionUnlocked()) {
@@ -578,15 +748,69 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
         }
     }
 
+    // Pass 6: Filter-only query fallback (e.g. "ext:pdf", "type:doc", "modified:today", "size:>100kb")
+    if (queryTokensLower.isEmpty() && candidateMap.isEmpty()) {
+        const bool hasMetadataFilter = !activeFilters.extensions.isEmpty() ||
+                                       !activeFilters.pathPrefix.isEmpty() ||
+                                       activeFilters.minSizeBytes >= 0 ||
+                                       activeFilters.maxSizeBytes >= 0 ||
+                                       activeFilters.modifiedAfterEpoch >= 0;
+        if (hasMetadataFilter) {
+            const char* filterSql =
+                "SELECT id, path, name, extension, size, mtime "
+                "FROM files "
+                "ORDER BY mtime DESC LIMIT ?1;";
+            database::ScopedStmt filterStmt;
+            if (sqlite3_prepare_v2(m_readDb, filterSql, -1, filterStmt.receive(), nullptr) == SQLITE_OK) {
+                sqlite3_bind_int(filterStmt.get(), 1, std::max(limit * 8, 400));
+                while (sqlite3_step(filterStmt.get()) == SQLITE_ROW) {
+                    const qint64 fid = sqlite3_column_int64(filterStmt.get(), 0);
+                    FileSearchResult item;
+                    item.id = fid;
+                    const char* rawPath = reinterpret_cast<const char*>(sqlite3_column_text(filterStmt.get(), 1));
+                    const char* rawName = reinterpret_cast<const char*>(sqlite3_column_text(filterStmt.get(), 2));
+                    const char* rawExt = reinterpret_cast<const char*>(sqlite3_column_text(filterStmt.get(), 3));
+                    item.size = sqlite3_column_int64(filterStmt.get(), 4);
+                    item.mtime = sqlite3_column_int64(filterStmt.get(), 5);
+                    item.path = rawPath ? QString::fromUtf8(rawPath) : QString();
+                    item.name = rawName ? QString::fromUtf8(rawName) : QString();
+                    item.extension = rawExt ? QString::fromUtf8(rawExt) : QString();
+                    item.parentDirectory = extractParentDir(item.path);
+
+                    if (!passesMetadataFilters(item, activeFilters)) {
+                        continue;
+                    }
+                    item.score = 100.0 + std::clamp(static_cast<double>(item.mtime - 1577836800) / 86400.0 * 0.01, 0.0, 35.0);
+                    candidateMap.insert(fid, std::move(item));
+                    if (candidateMap.size() >= limit) {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     sqlite3_progress_handler(m_readDb, 0, nullptr, nullptr);
 
     if (cancellationToken && cancellationToken->load(std::memory_order_relaxed)) {
         return {};
     }
 
+    const QStringList pinnedList = core::SettingsManager::instance().pinnedFiles();
+    QSet<QString> pinnedSetLower;
+    for (const QString& p : pinnedList) {
+        pinnedSetLower.insert(QDir::toNativeSeparators(p).toLower());
+    }
+
     finalResults.reserve(candidateMap.size());
     for (auto it = candidateMap.begin(); it != candidateMap.end(); ++it) {
-        finalResults.append(std::move(it.value()));
+        FileSearchResult item = std::move(it.value());
+        if (!pinnedSetLower.isEmpty() &&
+            pinnedSetLower.contains(QDir::toNativeSeparators(item.path).toLower())) {
+            item.isPinned = true;
+            item.score += 500.0;
+        }
+        finalResults.append(std::move(item));
     }
 
     const int sortCount = std::min(static_cast<int>(finalResults.size()), limit);
@@ -755,6 +979,90 @@ QVector<FileSearchResult> FileSearchEngine::findRelatedDocuments(
         *outElapsedMs = static_cast<double>(timer.nsecsElapsed()) / 1e6;
     }
     return results;
+}
+
+QString FileSearchEngine::fetchDocumentPreviewText(qint64 fileId,
+                                                   const QString& filePath,
+                                                   int maxChars) {
+    if (maxChars <= 0) {
+        return {};
+    }
+
+    // 1. Check indexed document_content table first (zero disk I/O beyond SQLite page cache)
+    if (fileId > 0) {
+        QMutexLocker locker(&m_readMutex);
+        if (ensureReadConnectionUnlocked()) {
+            database::ScopedStmt stmt;
+            if (sqlite3_prepare_v2(m_readDb,
+                                   "SELECT SUBSTR(body_text, 1, ?2), page_count "
+                                   "FROM document_content WHERE file_id = ?1;",
+                                   -1,
+                                   stmt.receive(),
+                                   nullptr) == SQLITE_OK) {
+                sqlite3_bind_int64(stmt.get(), 1, fileId);
+                sqlite3_bind_int(stmt.get(), 2, maxChars);
+                if (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+                    const char* rawText = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 0));
+                    const int pages = sqlite3_column_int(stmt.get(), 1);
+                    if (rawText != nullptr) {
+                        QString body = QString::fromUtf8(rawText).trimmed();
+                        if (!body.isEmpty()) {
+                            if (pages > 1) {
+                                return QStringLiteral("[%1 pages] %2").arg(pages).arg(body);
+                            }
+                            return body;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Fallback: fast bounded inspection of the physical file
+    if (filePath.isEmpty()) {
+        return {};
+    }
+    const QFileInfo fi(filePath);
+    if (!fi.exists() || !fi.isFile()) {
+        return QStringLiteral("File is no longer present on disk.");
+    }
+
+    const QString ext = fi.suffix().toLower();
+    if (ext == QStringLiteral("png") || ext == QStringLiteral("jpg") ||
+        ext == QStringLiteral("jpeg") || ext == QStringLiteral("bmp") ||
+        ext == QStringLiteral("ico") || ext == QStringLiteral("svg") ||
+        ext == QStringLiteral("webp") || ext == QStringLiteral("gif")) {
+        QImageReader reader(filePath);
+        const QSize sz = reader.size();
+        if (sz.isValid()) {
+            return QStringLiteral("Image Document • Resolution: %1 × %2 px • Format: %3")
+                .arg(sz.width())
+                .arg(sz.height())
+                .arg(ext.toUpper());
+        }
+        return QStringLiteral("Image Document (%1)").arg(ext.toUpper());
+    }
+
+    if (ext == QStringLiteral("txt") || ext == QStringLiteral("md") ||
+        ext == QStringLiteral("json") || ext == QStringLiteral("csv") ||
+        ext == QStringLiteral("log") || ext == QStringLiteral("ini") ||
+        ext == QStringLiteral("yaml") || ext == QStringLiteral("yml") ||
+        ext == QStringLiteral("xml") || ext == QStringLiteral("cpp") ||
+        ext == QStringLiteral("h") || ext == QStringLiteral("py") ||
+        ext == QStringLiteral("js") || ext == QStringLiteral("ts")) {
+        QFile f(filePath);
+        if (f.open(QIODevice::ReadOnly)) {
+            const QByteArray sample = f.read(std::min<qint64>(2048, maxChars * 3));
+            f.close();
+            if (!sample.contains('\0')) {
+                return QString::fromUtf8(sample).trimmed().left(maxChars);
+            }
+        }
+    }
+
+    return QStringLiteral("Binary / Archive File (.%1) • %2 bytes")
+        .arg(ext.isEmpty() ? QStringLiteral("file") : ext)
+        .arg(fi.size());
 }
 
 } // namespace lumen::search

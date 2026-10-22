@@ -47,6 +47,9 @@
 ### Offline Semantic Search (Zero-Keyword-Overlap Natural Language Discovery)
 ![Lumen Offline Semantic Search Results — Phase 3](docs/screenshots/phase3_semantic_search_results.png)
 
+### Complete Desktop UX — Search Modes & Instant Quick Preview (`Ctrl+P`)
+![Lumen Quick Preview & Search Modes — Phase 4](docs/screenshots/phase4_quick_preview_and_modes.png)
+
 ### Native On-Demand Settings Dialog
 ![Lumen Settings Dialog](docs/screenshots/phase0_settings_dialog.png)
 
@@ -58,12 +61,12 @@
 flowchart LR
     subgraph UI["Native UI Layer (Qt 6 Widgets + Win32)"]
         Bar["DesktopSearchBar\n(400×50 px Desktop Pill)"]
-        Popup["SearchPopupWidget\n(Virtualized QListView + Snippets)"]
+        Popup["SearchPopupWidget\n(Modes + Virtualized List + Quick Preview)"]
         Tray["TrayController &\nOn-Demand SettingsDialog"]
     end
 
     subgraph Platform["Windows Platform Layer"]
-        WinInt["DesktopIntegration\n(HWND_BOTTOM + WinEventHook + RegisterHotKey)"]
+        WinInt["DesktopIntegration\n(HWND_BOTTOM / TOPMOST + WinEventHook + RegisterHotKey)"]
         Single["SingleInstanceGuard\n(Named Kernel Mutex)"]
         Watcher["DirectoryWatcher\n(ReadDirectoryChangesW OVERLAPPED)"]
     end
@@ -103,8 +106,8 @@ flowchart LR
 | **Phase 1** | **Ultrafast Filename Indexing** | **Completed & Verified** | `FindFirstFileExW` background enumeration, `ReadDirectoryChangesW` real-time watcher, 5,000-row batch SQLite reconciliation, B-tree prefix + FTS5 trigram search engine, relevance ranking, virtualized results UI |
 | **Phase 2** | **Document Content Search** | **Completed & Verified** | Zero-external-dependency native extractors for `.txt`, `.md`, `.docx` (ZIP + WordprocessingML), and multi-page `.pdf` (`/FlateDecode` + `BT...ET` parser + page offsets), RFC 1951/1950 Deflate with 16 MB ZIP-bomb cap, FTS5 `unicode61` BM25 content search, highlighted snippets & PDF page badges |
 | **Phase 3** | **Offline Semantic Search** | **Completed & Verified** | Lazy-loaded ONNX Runtime CPU inference (`all-MiniLM-L6-v2` INT8 quantized, 384-D), native BERT WordPiece tokenizer, 350-word overlapping document chunker, SQLite `document_chunks` vector store, hybrid lexical + semantic ranking, `findRelatedDocuments`, automatic memory unloading (`_heapmin` + `SetProcessWorkingSetSizeEx`) |
-| **Phase 4** | **Complete Desktop UX** | **In Progress** | Search modes (`All`, `Files`, `Content`, `Semantic`), quick file preview, context menu actions, `Find Related Documents`, light/dark/system themes |
-| **Phase 5** | **Production Hardening + Microsoft Store** | Planned | Integrity recovery, full settings suite, standalone Windows installer + MSIX package, full benchmark suite |
+| **Phase 4** | **Complete Desktop UX** | **Completed & Verified** | Interactive Search Modes (`All`, `Files`, `Content`, `Semantic` via `Tab` or pill click), inline filter syntax (`ext:`, `type:`, `in:`, `size:`, `modified:`), on-demand Quick Preview pane (`Ctrl+P`), right-click context menu, Reveal in Explorer (`Ctrl+Enter`), Copy Path (`Ctrl+Shift+C`), Find Similar Documents (`Ctrl+R`), Pinned Favorites (`Ctrl+D`), Desktop vs. Always-on-Top mode |
+| **Phase 5** | **Production Hardening + Microsoft Store** | **In Progress** | Database corruption self-healing, full settings suite, standalone Windows installer + MSIX package, full benchmark suite |
 
 ---
 
@@ -195,7 +198,8 @@ Lumen/
 │   ├── phase0_tests.cpp            # Phase 0 automated QtTest suite (10 tests)
 │   ├── phase1_tests.cpp            # Phase 1 automated QtTest suite (7 tests)
 │   ├── phase2_tests.cpp            # Phase 2 automated QtTest suite (7 tests)
-│   └── phase3_tests.cpp            # Phase 3 automated QtTest suite (6 tests)
+│   ├── phase3_tests.cpp            # Phase 3 automated QtTest suite (6 tests)
+│   └── phase4_tests.cpp            # Phase 4 automated QtTest suite (6 tests)
 ├── benchmarks/
 │   ├── phase1_benchmark.cpp        # Reproducible 100,000-file NTFS filename benchmark
 │   ├── phase2_benchmark.cpp        # Reproducible 1,000-document content & FTS5 benchmark
@@ -225,7 +229,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/Q
 cmake --build build --config Release
 ```
 
-### 2. Run Automated Tests (30 Tests across Phases 0, 1, 2, and 3)
+### 2. Run Automated Tests (36 Tests across Phases 0, 1, 2, 3, and 4)
 
 ```powershell
 $env:PATH = "C:\Qt\6.8.2\msvc2022_64\bin;$env:PATH"

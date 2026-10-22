@@ -34,7 +34,7 @@ int main(int argc, char* argv[]) {
     QApplication::setOrganizationDomain(QStringLiteral("ushalabs.com"));
     QApplication::setApplicationName(QStringLiteral("Lumen"));
     QApplication::setApplicationDisplayName(QStringLiteral("Lumen"));
-    QApplication::setApplicationVersion(QStringLiteral("0.4.0"));
+    QApplication::setApplicationVersion(QStringLiteral("0.5.0"));
     QApplication::setQuitOnLastWindowClosed(false);
     QApplication::setWindowIcon(lumen::ui::BrandingIcon::createAppIcon());
 
@@ -89,7 +89,7 @@ int main(int argc, char* argv[]) {
                 QCoreApplication::processEvents();
                 bar->grab().save(dir.filePath(QStringLiteral("phase0_desktop_bar_idle.png")));
 
-                // Ensure sample records exist to render Phase 1, Phase 2 & Phase 3 live search results screenshots
+                // Ensure sample records exist to render Phase 1, Phase 2, Phase 3 & Phase 4 live search results screenshots
                 auto& db = lumen::database::DatabaseManager::instance();
                 db.clearAllFiles();
                 const qint64 now = QDateTime::currentSecsSinceEpoch();
@@ -166,17 +166,26 @@ int main(int argc, char* argv[]) {
                         QTimer::singleShot(250, &qApp[0], [bar, dir]() {
                             QCoreApplication::processEvents();
                             bar->grab().save(dir.filePath(QStringLiteral("phase3_semantic_search_results.png")));
-                            bar->collapsePopupAndDeactivate(true);
 
-                            lumen::ui::SettingsDialog settingsDlg;
-                            settingsDlg.show();
-                            QCoreApplication::processEvents();
-                            settingsDlg.grab().save(dir.filePath(QStringLiteral("phase0_settings_dialog.png")));
-                            settingsDlg.hide();
+                            // Phase 4: Toggle Quick Preview pane on the top semantic result
+                            if (bar->popupWidget()) {
+                                bar->popupWidget()->setPreviewVisible(true);
+                            }
+                            QTimer::singleShot(180, &qApp[0], [bar, dir]() {
+                                QCoreApplication::processEvents();
+                                bar->grab().save(dir.filePath(QStringLiteral("phase4_quick_preview_and_modes.png")));
+                                bar->collapsePopupAndDeactivate(true);
 
-                            lumen::semantic::SemanticEmbeddingEngine::instance().unloadModel();
-                            lumen::database::DatabaseManager::instance().clearAllFiles();
-                            QCoreApplication::quit();
+                                lumen::ui::SettingsDialog settingsDlg;
+                                settingsDlg.show();
+                                QCoreApplication::processEvents();
+                                settingsDlg.grab().save(dir.filePath(QStringLiteral("phase0_settings_dialog.png")));
+                                settingsDlg.hide();
+
+                                lumen::semantic::SemanticEmbeddingEngine::instance().unloadModel();
+                                lumen::database::DatabaseManager::instance().clearAllFiles();
+                                QCoreApplication::quit();
+                            });
                         });
                     });
                 });

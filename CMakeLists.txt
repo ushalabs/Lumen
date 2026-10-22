@@ -172,6 +172,15 @@ target_link_libraries(phase3_tests PRIVATE
 )
 add_test(NAME Phase3Tests COMMAND phase3_tests)
 
+add_executable(phase4_tests
+    tests/phase4_tests.cpp
+)
+target_link_libraries(phase4_tests PRIVATE
+    lumen_lib
+    Qt6::Test
+)
+add_test(NAME Phase4Tests COMMAND phase4_tests)
+
 add_executable(phase1_benchmark
     benchmarks/phase1_benchmark.cpp
 )

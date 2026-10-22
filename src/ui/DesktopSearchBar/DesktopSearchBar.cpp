@@ -9,9 +9,11 @@
 #include "ui/SearchResults/SearchPopupWidget.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QColor>
 #include <QCursor>
 #include <QDesktopServices>
+#include <QDir>
 #include <QEvent>
 #include <QFont>
 #include <QGuiApplication>
@@ -32,6 +34,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <shellapi.h>
 
 namespace lumen::ui {
 
@@ -63,13 +66,70 @@ DesktopSearchBar::DesktopSearchBar(QWidget* parent)
     connect(m_searchEdit, &QLineEdit::textChanged, this, &DesktopSearchBar::onSearchTextChanged);
     connect(m_popupWidget, &SearchPopupWidget::resultActivated, this, &DesktopSearchBar::onResultActivated);
 
+    connect(m_popupWidget, &SearchPopupWidget::searchModeChanged, this, [this](search::SearchMode) {
+        const QString trimmed = m_searchEdit->text().trimmed();
+        if (!trimmed.isEmpty()) {
+            dispatchAsyncSearch(trimmed);
+        }
+    });
+
+    connect(m_popupWidget, &SearchPopupWidget::previewVisibilityChanged, this, [this](bool visible) {
+        if (visible) {
+            if (const auto* sel = m_popupWidget->selectedResult()) {
+                updatePreviewForResult(*sel);
+            }
+        }
+        updateExpandedGeometry();
+    });
+
+    connect(m_popupWidget, &SearchPopupWidget::selectedResultChanged,
+            this, [this](const search::FileSearchResult& res) {
+                if (m_popupWidget->isPreviewVisible()) {
+                    updatePreviewForResult(res);
+                }
+            });
+
+    connect(m_popupWidget, &SearchPopupWidget::revealInExplorerRequested,
+            this, &DesktopSearchBar::revealResultInExplorer);
+
+    connect(m_popupWidget, &SearchPopupWidget::copyPathRequested,
+            this, &DesktopSearchBar::copyResultPathToClipboard);
+
+    connect(m_popupWidget, &SearchPopupWidget::findRelatedRequested,
+            this, &DesktopSearchBar::dispatchRelatedDocumentsSearch);
+
+    connect(m_popupWidget, &SearchPopupWidget::togglePinRequested,
+            this, [this](const search::FileSearchResult& res) {
+                core::SettingsManager::instance().togglePinnedFile(res.path, true);
+                const QString trimmed = m_searchEdit->text().trimmed();
+                if (!trimmed.isEmpty()) {
+                    dispatchAsyncSearch(trimmed);
+                }
+            });
+
+    connect(m_popupWidget, &SearchPopupWidget::exitRelatedModeRequested,
+            this, [this]() {
+                const QString trimmed = m_searchEdit->text().trimmed();
+                if (!trimmed.isEmpty()) {
+                    dispatchAsyncSearch(trimmed);
+                }
+            });
+
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged,
+            this, [this](Qt::ColorScheme) {
+                if (core::SettingsManager::instance().appearancePreference().compare(
+                        QStringLiteral("system"), Qt::CaseInsensitive) == 0) {
+                    refreshAppearanceFromSettings();
+                }
+            });
+
     refreshAppearanceFromSettings();
     applySavedOrDefaultPosition();
     bindScreenSignals();
 
     platform::windows::DesktopIntegration::installForegroundEventHook(
         [this](HWND /*foregroundHwnd*/, bool isDesktopShell) {
-            if (!isVisible()) {
+            if (!isVisible() || m_alwaysOnTop) {
                 return;
             }
             const HWND myHwnd = reinterpret_cast<HWND>(winId());
@@ -145,8 +205,23 @@ void DesktopSearchBar::applySavedOrDefaultPosition() {
     move(targetPos);
 }
 
+void DesktopSearchBar::applyRestingWindowZOrder() {
+    if (!testAttribute(Qt::WA_WState_Created)) {
+        return;
+    }
+    const HWND hwnd = reinterpret_cast<HWND>(winId());
+    if (m_alwaysOnTop) {
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    } else {
+        platform::windows::DesktopIntegration::placeOnDesktopBottom(hwnd);
+    }
+}
+
 void DesktopSearchBar::refreshAppearanceFromSettings() {
-    const QString pref = core::SettingsManager::instance().appearancePreference().toLower();
+    auto& settings = core::SettingsManager::instance();
+    m_alwaysOnTop = settings.alwaysOnTopMode();
+
+    const QString pref = settings.appearancePreference().toLower();
     if (pref == QStringLiteral("dark")) {
         m_darkTheme = true;
     } else if (pref == QStringLiteral("system")) {
@@ -174,6 +249,9 @@ void DesktopSearchBar::refreshAppearanceFromSettings() {
 
     if (m_popupWidget != nullptr) {
         m_popupWidget->setDarkTheme(m_darkTheme);
+    }
+    if (!m_isSearchActive) {
+        applyRestingWindowZOrder();
     }
     update();
 }
@@ -225,15 +303,16 @@ void DesktopSearchBar::collapsePopupAndDeactivate(bool clearQuery) {
     if (clearQuery && !m_searchEdit->text().isEmpty()) {
         m_searchEdit->clear();
     }
+    if (m_popupWidget != nullptr) {
+        m_popupWidget->setPreviewVisible(false);
+        m_popupWidget->setRelatedSourceFileName(QString());
+    }
     setPopupExpanded(false);
     m_searchEdit->deselect();
     m_searchEdit->clearFocus();
     m_isSearchActive = false;
 
-    if (testAttribute(Qt::WA_WState_Created)) {
-        const HWND hwnd = reinterpret_cast<HWND>(winId());
-        platform::windows::DesktopIntegration::placeOnDesktopBottom(hwnd);
-    }
+    applyRestingWindowZOrder();
 
     if (semantic::SemanticEmbeddingEngine::instance().isSessionLoaded()) {
         QTimer::singleShot(180000, this, []() {
@@ -284,23 +363,37 @@ void DesktopSearchBar::updateExpandedGeometry() {
     m_popupWidget->setGeometry(0, kBarHeight + kPopupGap, kBarWidth, popH);
 }
 
+void DesktopSearchBar::updatePreviewForResult(const search::FileSearchResult& result) {
+    if (!m_popupWidget || !m_popupWidget->isPreviewVisible()) {
+        return;
+    }
+    const QString preview = m_searchEngine.fetchDocumentPreviewText(result.id, result.path, 500);
+    m_popupWidget->setPreviewText(preview);
+}
+
 void DesktopSearchBar::dispatchAsyncSearch(const QString& trimmedQuery) {
     if (m_activeCancelToken) {
         m_activeCancelToken->store(true, std::memory_order_relaxed);
     }
 
+    if (m_popupWidget != nullptr) {
+        m_popupWidget->setRelatedSourceFileName(QString());
+    }
+
     const quint64 gen = ++m_queryGeneration;
     auto cancelToken = std::make_shared<std::atomic_bool>(false);
     m_activeCancelToken = cancelToken;
+    const search::SearchMode mode = m_popupWidget ? m_popupWidget->searchMode() : search::SearchMode::All;
+    const search::SearchFilters filters = search::FileSearchEngine::filtersForSearchMode(mode);
 
     QPointer<DesktopSearchBar> safeThis(this);
-    m_searchPool.start(QRunnable::create([safeThis, trimmedQuery, gen, cancelToken]() {
+    m_searchPool.start(QRunnable::create([safeThis, trimmedQuery, filters, gen, cancelToken]() {
         if (!safeThis || cancelToken->load(std::memory_order_relaxed)) {
             return;
         }
         double elapsedMs = 0.0;
         QVector<search::FileSearchResult> results = safeThis->m_searchEngine.searchFiles(
-            trimmedQuery, search::SearchFilters{}, 50, cancelToken, &elapsedMs);
+            trimmedQuery, filters, 50, cancelToken, &elapsedMs);
 
         if (cancelToken->load(std::memory_order_relaxed) || !safeThis) {
             return;
@@ -317,6 +410,43 @@ void DesktopSearchBar::dispatchAsyncSearch(const QString& trimmedQuery) {
                 }
                 const int count = static_cast<int>(results.size());
                 safeThis->m_popupWidget->setSearchResults(std::move(results), elapsedMs);
+                safeThis->updateExpandedGeometry();
+                emit safeThis->searchCompleted(count, elapsedMs);
+            },
+            Qt::QueuedConnection);
+    }));
+}
+
+void DesktopSearchBar::dispatchRelatedDocumentsSearch(const search::FileSearchResult& sourceResult) {
+    if (sourceResult.id <= 0) {
+        return;
+    }
+    if (m_activeCancelToken) {
+        m_activeCancelToken->store(true, std::memory_order_relaxed);
+    }
+
+    const quint64 gen = ++m_queryGeneration;
+    const qint64 srcId = sourceResult.id;
+    const QString srcName = sourceResult.name;
+
+    QPointer<DesktopSearchBar> safeThis(this);
+    m_searchPool.start(QRunnable::create([safeThis, srcId, srcName, gen]() {
+        if (!safeThis) {
+            return;
+        }
+        double elapsedMs = 0.0;
+        QVector<search::FileSearchResult> related = safeThis->m_searchEngine.findRelatedDocuments(
+            srcId, 20, &elapsedMs);
+
+        QMetaObject::invokeMethod(
+            safeThis,
+            [safeThis, related = std::move(related), srcName, elapsedMs, gen]() mutable {
+                if (!safeThis || gen != safeThis->m_queryGeneration) {
+                    return;
+                }
+                const int count = static_cast<int>(related.size());
+                safeThis->m_popupWidget->setRelatedSourceFileName(srcName);
+                safeThis->m_popupWidget->setSearchResults(std::move(related), elapsedMs);
                 safeThis->updateExpandedGeometry();
                 emit safeThis->searchCompleted(count, elapsedMs);
             },
@@ -345,11 +475,47 @@ void DesktopSearchBar::onSearchTextChanged(const QString& text) {
 }
 
 void DesktopSearchBar::onResultActivated(const search::FileSearchResult& result) {
+    const QString trimmed = m_searchEdit ? m_searchEdit->text().trimmed() : QString();
+    if (!trimmed.isEmpty()) {
+        core::SettingsManager::instance().addRecentSearch(trimmed, true);
+    }
     emit fileResultActivated(result);
     if (m_openFilesWithShell && !result.path.isEmpty()) {
         QDesktopServices::openUrl(QUrl::fromLocalFile(result.path));
     }
     collapsePopupAndDeactivate(false);
+}
+
+void DesktopSearchBar::revealResultInExplorer(const search::FileSearchResult& result) {
+    if (result.path.isEmpty()) {
+        return;
+    }
+    emit fileRevealedInExplorer(result);
+    if (m_openFilesWithShell) {
+        const QString nativePath = QDir::toNativeSeparators(result.path);
+        const QString param = QStringLiteral("/select,\"%1\"").arg(nativePath);
+        const std::wstring wParam = param.toStdWString();
+        ::ShellExecuteW(nullptr, L"open", L"explorer.exe", wParam.c_str(), nullptr, SW_SHOWNORMAL);
+    }
+}
+
+void DesktopSearchBar::copyResultPathToClipboard(const search::FileSearchResult& result) {
+    if (result.path.isEmpty()) {
+        return;
+    }
+    const QString nativePath = QDir::toNativeSeparators(result.path);
+    if (auto* cb = QGuiApplication::clipboard()) {
+        cb->setText(nativePath);
+    }
+    emit filePathCopied(nativePath);
+}
+
+void DesktopSearchBar::triggerFindRelatedForSelected() {
+    if (m_popupWidget != nullptr) {
+        if (const auto* sel = m_popupWidget->selectedResult()) {
+            dispatchRelatedDocumentsSearch(*sel);
+        }
+    }
 }
 
 void DesktopSearchBar::bindScreenSignals() {
@@ -448,7 +614,7 @@ void DesktopSearchBar::showEvent(QShowEvent* event) {
     const HWND hwnd = reinterpret_cast<HWND>(winId());
     platform::windows::DesktopIntegration::applyDesktopWidgetStyles(hwnd);
     if (!m_isSearchActive) {
-        platform::windows::DesktopIntegration::placeOnDesktopBottom(hwnd);
+        applyRestingWindowZOrder();
     }
     if (!m_hotkeyRegistered) {
         registerConfiguredGlobalShortcut();
@@ -537,10 +703,21 @@ bool DesktopSearchBar::eventFilter(QObject* watched, QEvent* event) {
             update();
         } else if (event->type() == QEvent::KeyPress) {
             auto* keyEvent = static_cast<QKeyEvent*>(event);
+            const Qt::KeyboardModifiers mods = keyEvent->modifiers();
+            const bool ctrl = (mods & Qt::ControlModifier) != 0;
+            const bool shift = (mods & Qt::ShiftModifier) != 0;
+
             switch (keyEvent->key()) {
                 case Qt::Key_Escape:
                     collapsePopupAndDeactivate(false);
                     return true;
+                case Qt::Key_Tab:
+                case Qt::Key_Backtab:
+                    if (m_popupExpanded) {
+                        m_popupWidget->cycleSearchMode(keyEvent->key() != Qt::Key_Backtab && !shift);
+                        return true;
+                    }
+                    break;
                 case Qt::Key_Down:
                     if (m_popupExpanded && m_popupWidget->resultCount() > 0) {
                         m_popupWidget->selectNext();
@@ -556,8 +733,46 @@ bool DesktopSearchBar::eventFilter(QObject* watched, QEvent* event) {
                 case Qt::Key_Return:
                 case Qt::Key_Enter:
                     if (m_popupExpanded && m_popupWidget->resultCount() > 0) {
+                        if (ctrl) {
+                            if (const auto* sel = m_popupWidget->selectedResult()) {
+                                revealResultInExplorer(*sel);
+                                return true;
+                            }
+                        }
                         m_popupWidget->activateSelected();
                         return true;
+                    }
+                    break;
+                case Qt::Key_P:
+                    if (ctrl && m_popupExpanded) {
+                        m_popupWidget->togglePreview();
+                        return true;
+                    }
+                    break;
+                case Qt::Key_R:
+                    if (ctrl && m_popupExpanded && m_popupWidget->resultCount() > 0) {
+                        triggerFindRelatedForSelected();
+                        return true;
+                    }
+                    break;
+                case Qt::Key_D:
+                    if (ctrl && m_popupExpanded && m_popupWidget->resultCount() > 0) {
+                        if (const auto* sel = m_popupWidget->selectedResult()) {
+                            core::SettingsManager::instance().togglePinnedFile(sel->path, true);
+                            const QString trimmed = m_searchEdit->text().trimmed();
+                            if (!trimmed.isEmpty()) {
+                                dispatchAsyncSearch(trimmed);
+                            }
+                            return true;
+                        }
+                    }
+                    break;
+                case Qt::Key_C:
+                    if (ctrl && shift && m_popupExpanded && m_popupWidget->resultCount() > 0) {
+                        if (const auto* sel = m_popupWidget->selectedResult()) {
+                            copyResultPathToClipboard(*sel);
+                            return true;
+                        }
                     }
                     break;
                 default:
@@ -593,7 +808,7 @@ bool DesktopSearchBar::nativeEvent(const QByteArray& eventType, void* message, q
             const HWND hwnd = reinterpret_cast<HWND>(winId());
             platform::windows::DesktopIntegration::applyDesktopWidgetStyles(hwnd);
             if (!m_isSearchActive) {
-                platform::windows::DesktopIntegration::placeOnDesktopBottom(hwnd);
+                applyRestingWindowZOrder();
             }
             emit explorerRestartDetected();
             return false;
@@ -619,7 +834,7 @@ bool DesktopSearchBar::nativeEvent(const QByteArray& eventType, void* message, q
             }
             case WM_WINDOWPOSCHANGING: {
                 WINDOWPOS* wp = reinterpret_cast<WINDOWPOS*>(msg->lParam);
-                if (wp != nullptr && !m_isSearchActive && !m_keepAboveShellTemp) {
+                if (wp != nullptr && !m_isSearchActive && !m_keepAboveShellTemp && !m_alwaysOnTop) {
                     wp->hwndInsertAfter = HWND_BOTTOM;
                 }
                 break;

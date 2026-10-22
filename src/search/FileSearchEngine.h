@@ -11,6 +11,13 @@ struct sqlite3;
 
 namespace lumen::search {
 
+enum class SearchMode {
+    All = 0,
+    Files = 1,
+    Content = 2,
+    Semantic = 3
+};
+
 enum class SearchResultMatchType {
     Filename = 0,
     Content = 1,
@@ -42,6 +49,7 @@ struct FileSearchResult {
     double score = 0.0;
     int matchStart = -1;
     int matchLength = 0;
+    bool isPinned = false;
 
     // Phase 2 & Phase 3 Document Content / Semantic fields
     SearchResultMatchType matchType = SearchResultMatchType::Filename;
@@ -73,6 +81,18 @@ public:
         qint64 sourceFileId,
         int limit = 10,
         double* outElapsedMs = nullptr);
+
+    // Fetches a bounded text preview for the Quick Preview panel (from indexed content or fast disk read).
+    QString fetchDocumentPreviewText(qint64 fileId,
+                                     const QString& filePath,
+                                     int maxChars = 600);
+
+    static SearchFilters filtersForSearchMode(SearchMode mode,
+                                              const SearchFilters& baseFilters = SearchFilters{});
+
+    static QString parseInlineQueryAndFilters(const QString& rawQuery,
+                                              const SearchFilters& baseFilters,
+                                              SearchFilters* outFilters);
 
     static double computeFilenameScore(const QString& fileName,
                                        const QString& extension,
