@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/branding/lumen_logo.svg" alt="Lumen Logo" width="88" height="88" />
+<img src="assets/branding/lumen_logo.svg" alt="Lumen Logo" width="84" height="84" />
 
 # Lumen
 
@@ -11,125 +11,205 @@
 [![UI](https://img.shields.io/badge/UI-Qt%206%20Widgets%20%2B%20Win32-41CD52?style=flat-square&logo=qt)](https://www.qt.io/)
 [![Database](https://img.shields.io/badge/Database-SQLite%203%20(WAL%20%2B%20FTS5)-003B57?style=flat-square&logo=sqlite)](https://www.sqlite.org/)
 [![AI](https://img.shields.io/badge/AI-ONNX%20Runtime%20CPU%20(MiniLM%20INT8)-8B5CF6?style=flat-square)](https://onnxruntime.ai/)
+[![Package](https://img.shields.io/badge/Package-Windows%20MSIX-0078D7?style=flat-square&logo=windows11)](https://github.com/ushalabs/Lumen)
 [![Privacy](https://img.shields.io/badge/Privacy-100%25%20Offline-10B981?style=flat-square)](https://github.com/ushalabs/Lumen)
 
-**Developed by [UshaLabs](https://github.com/ushalabs)**
+**Developed with precision by [UshaLabs](https://github.com/ushalabs)**
 
 </div>
 
 ---
 
-## Vision
+## Overview
 
-**Lumen** is a native C++20 desktop file discovery utility for Windows 10 and Windows 11. It combines **Everything-class filename speed**, **full-text document search**, and **on-device semantic retrieval** inside a compact, persistent search bar that lives directly on the Windows desktop.
+**Lumen** is a high-performance desktop search utility engineered in native **C++20** for Windows 10 and Windows 11. It brings together **instant filename discovery**, **deep document content indexing**, and **on-device neural semantic retrieval** inside an elegant, persistent search bar that lives directly on your Windows desktop.
 
-> **Core Engineering Principle:**  
-> *Lumen remains nearly invisible to the operating system when idle while staying immediately accessible on the desktop.*
+Built to follow the visual identity and design language of **UshaLabs Downshift**, Lumen delivers a seamless desktop experience without the resource bloat of Electron or cloud dependencies.
 
-- **Zero Cloud Dependencies:** No accounts, no telemetry, no external APIs, and no network traffic at runtime.
-- **Native Desktop Integration:** A persistent, compact desktop search widget (`400 × 50` px) positioned in the upper-right desktop work area—plus a global keyboard shortcut (`Ctrl+Alt+Space`) from any running application.
-- **On-Demand Offline AI:** Bundled INT8-quantized `all-MiniLM-L6-v2` (384-D) model via dynamically loaded ONNX Runtime CPU (`LoadLibraryW` + `ORT_API_MANUAL_INIT`). Never loaded at startup; automatically unloaded after background indexing or search inactivity to reclaim working set pages.
-- **Exceptional Resource Efficiency:** Consumes **~0.01% idle CPU** and **~27–30 MB Working Set RAM** (`~5.5 MB` private memory), with **~34–87 ms startup**.
+> **Core Engineering Philosophy:**  
+> *Lumen remains nearly invisible to the operating system when idle while staying instantly accessible on the desktop.*
+
+- **100% Offline & Private:** No cloud APIs, no accounts, no telemetry, and zero network traffic. Everything is indexed, stored, and queried locally on your machine.
+- **Persistent Desktop Bar:** Positioned neatly at the upper-right corner of your desktop (`460 × 52` px) with zero desktop disruption, plus an instant global shortcut (`Ctrl+Alt+Space`) from any application.
+- **Instant Search Across 100k+ Files:** Sub-5ms query response times via dual-tier B-tree prefix indexing and SQLite FTS5 trigram matching.
+- **Zero-Dependency Document Parser:** Built-in native text extractors for `.pdf` (with page tracking), `.docx`, `.md`, and `.txt` utilizing pure C++ RFC 1950/1951 Deflate decompression.
+- **On-Demand Neural Semantic Search:** Bundled INT8-quantized `all-MiniLM-L6-v2` transformer model (384-D) running locally on CPU via ONNX Runtime. Dynamically loaded on demand and automatically unloaded during idle periods to reclaim memory.
+- **Near-Zero Resource Footprint:** Idles at **~0.01% CPU** and **~27–30 MB Working Set RAM** (`~5.5 MB` private bytes), waking in under **35 ms**.
 
 ---
 
-## Screenshots
+## Features & Visual Walkthrough
 
-### Persistent Desktop Search Bar (Idle State)
-![Lumen Desktop Search Bar — Idle](docs/screenshots/phase0_desktop_bar_idle.png)
+### 1. Persistent Desktop Search Bar
 
-### Live Filename Search Results (Virtualized Dropdown)
-![Lumen Desktop Search Results — Phase 1](docs/screenshots/phase1_desktop_search_results.png)
+The search bar is Lumen's primary entry point. Designed as a sleek, rounded pill docked to the upper-right corner of your desktop, it rests permanently on the Windows wallpaper surface without occluding open windows or interrupting your active workspace.
 
-### Full-Text Document Content Search (`PDF` Page Number + Highlighted Snippets)
-![Lumen Document Content Search Results — Phase 2](docs/screenshots/phase2_content_search_results.png)
+<div align="center">
+  <img src="docs/screenshots/desktop_search_bar.png" alt="Lumen Desktop Search Bar — Idle State" width="680" />
+</div>
 
-### Offline Semantic Search (Zero-Keyword-Overlap Natural Language Discovery)
-![Lumen Offline Semantic Search Results — Phase 3](docs/screenshots/phase3_semantic_search_results.png)
+- **Unobtrusive Desktop Docking:** Anchored using Win32 `HWND_BOTTOM` integration so it stays comfortably behind active windows.
+- **`Win+D` (Show Desktop) Resilient:** Listens to shell minimize events through a low-overhead WinEvent hook, remaining visible and accessible when you switch to your desktop.
+- **Global Hotkey Summoning:** Press `Ctrl+Alt+Space` from inside any game, browser, or full-screen app to instantly summon Lumen into focus.
+- **Downshift Visual Styling:** Refined `#EC1680` pink focus halo, smooth 14px rounded corners, and native typography.
 
-### Complete Desktop UX — Search Modes & Instant Quick Preview (`Ctrl+P`)
-![Lumen Quick Preview & Search Modes — Phase 4](docs/screenshots/phase4_quick_preview_and_modes.png)
+---
 
-### Native On-Demand Settings Dialog
-![Lumen Settings Dialog](docs/screenshots/phase0_settings_dialog.png)
+### 2. Instant Filename Discovery
+
+Type any keyword, prefix, acronym, or substring to locate files instantly across your entire library. Lumen searches hundreds of thousands of files in single-digit milliseconds.
+
+<div align="center">
+  <img src="docs/screenshots/filename_search.png" alt="Lumen Filename Search Results" width="680" />
+</div>
+
+- **Sub-5ms Query Latency:** Backed by SQLite 3.47 WAL mode with dual B-tree exact prefix indexing and FTS5 trigram substring matching.
+- **Real-Time Filesystem Synchronization:** Monitors folder changes asynchronously via `ReadDirectoryChangesW` non-blocking completion routines, reconciling additions, renames, and deletions in sub-millisecond time.
+- **Smart Relevance Ranking:** Automatically prioritizes exact filename matches, shallow folder hierarchies, and recently modified documents.
+- **Smooth Virtualized Display:** Effortlessly renders large result sets without UI lag or memory spikes.
+
+---
+
+### 3. Deep Document Content Search
+
+Find files by what is written *inside* them—even if you do not remember their filename or folder location.
+
+<div align="center">
+  <img src="docs/screenshots/document_content_search.png" alt="Lumen Document Content Search" width="680" />
+</div>
+
+- **Native Multi-Format Support:** Extracts text directly from Adobe PDF (`.pdf`), Microsoft Word (`.docx`), Markdown (`.md`), plain text (`.txt`, `.log`), and source code files.
+- **Zero Heavy Dependencies:** Implements a standalone RFC 1950/1951 Deflate decompression codec with a strict 16 MB decompression limit for total protection against zip-bombs and malformed streams.
+- **Precise PDF Page Resolution:** Automatically tracks byte offsets and page markers (`/FlateDecode` + `BT...ET`), displaying exact page badges (e.g. `p. 1`) directly in the search results.
+- **BM25 Highlighted Snippets:** Highlights search terms in contextual snippets with Downshift pink accents, allowing you to preview matching text before opening the file.
+
+---
+
+### 4. On-Device Neural Semantic Discovery
+
+Search your personal knowledge base using natural language descriptions, high-level concepts, or vague recollections—with **zero keyword overlap**.
+
+<div align="center">
+  <img src="docs/screenshots/semantic_search.png" alt="Lumen Offline Semantic Search" width="680" />
+</div>
+
+- **Local Transformer Model:** Bundles a quantized INT8 `all-MiniLM-L6-v2` embedding model (384-dimensional dense vectors) executed entirely on your CPU via ONNX Runtime.
+- **Native WordPiece Tokenizer:** Standalone C++ tokenizer utilizing standard BERT vocabulary (`vocab.txt`) with greedy longest-match segmentation.
+- **Sliding-Window Document Chunker:** Splits documents into 350-word chunks with 50-word overlaps to preserve semantic continuity across lengthy reports and research papers.
+- **Adaptive Memory Management:** ONNX Runtime is dynamically loaded via `LoadLibraryW` only when semantic operations are initiated. After indexing or query inactivity, the inference engine is unloaded, and heap memory is returned to the OS via `_heapmin` and `SetProcessWorkingSetSizeEx`.
+
+---
+
+### 5. Search Modes & Instant Quick Preview
+
+Navigate your files with dedicated search filters, interactive keyboard navigation, and side-by-side file previews.
+
+<div align="center">
+  <img src="docs/screenshots/quick_preview_and_modes.png" alt="Lumen Quick Preview & Search Modes" width="680" />
+</div>
+
+- **Interactive Search Mode Pills:** Quickly isolate results by toggling `All`, `Files`, `Content`, or `Semantic` modes via mouse click or the `Tab` / `Shift+Tab` keyboard shortcuts.
+- **Inline Filter Syntax:** Narrow your search directly in the query field:
+  - `ext:pdf`, `ext:docx`, `ext:rs` — filter by file extension.
+  - `type:doc`, `type:code`, `type:media` — filter by document category.
+  - `in:Downloads`, `in:Projects` — scope to specific directories.
+  - `size:>10mb`, `size:<500kb` — filter by file size thresholds.
+  - `modified:today`, `modified:thisweek` — filter by modification recency.
+- **Instant Quick Preview (`Ctrl+P`):** Toggle a side-by-side preview panel showing document metadata, full file paths, formatted content snippets, and page references.
+- **Power User Shortcuts:**
+  - `Enter` — Open file in default application.
+  - `Ctrl+Enter` — Reveal file in Windows File Explorer.
+  - `Ctrl+Shift+C` — Copy absolute file path to clipboard.
+  - `Ctrl+R` — Find semantically related documents.
+  - `Ctrl+D` — Toggle pinned favorite status.
+  - Right-click — Open the custom Downshift-styled context menu.
+
+---
+
+### 6. Configuration & Customization
+
+Fine-tune Lumen's indexing locations, appearance, and system behavior through the native settings panel.
+
+<div align="center">
+  <img src="docs/screenshots/settings_dialog.png" alt="Lumen Native Settings Dialog" width="460" />
+</div>
+
+- **Indexed Folders Management:** Add custom storage drives or folders with recursive directory scanning.
+- **Exclusion Filters:** Define custom folder or pattern exclusions (e.g. `.git`, `node_modules`, `build`, `target`).
+- **Display Modes:** Switch between docked **Desktop Mode** and **Always-on-Top Floating Mode**.
+- **Autostart Control:** Configure automatic startup with Windows.
+- **Index Health & Maintenance:** Trigger on-demand re-indexing, perform SQLite database vacuuming, and view real-time index size metrics.
 
 ---
 
 ## Architecture
 
+Lumen is engineered with a modular, reactive architecture that separates Windows platform integration, asynchronous indexing, local storage, and user interface rendering:
+
 ```mermaid
-flowchart LR
+flowchart TD
     subgraph UI["Native UI Layer (Qt 6 Widgets + Win32)"]
-        Bar["DesktopSearchBar\n(400×50 px Desktop Pill)"]
-        Popup["SearchPopupWidget\n(Modes + Virtualized List + Quick Preview)"]
-        Tray["TrayController &\nOn-Demand SettingsDialog"]
+        Bar["DesktopSearchBar\n(Docked 460×52 px Desktop Pill)"]
+        Popup["SearchPopupWidget\n(Mode Filter Pills + Virtualized List)"]
+        Preview["QuickPreviewWidget\n(Metadata + Content + Page View)"]
+        Settings["SettingsDialog\n(Folder Scopes + Exclusion Rules)"]
     end
 
     subgraph Platform["Windows Platform Layer"]
-        WinInt["DesktopIntegration\n(HWND_BOTTOM / TOPMOST + WinEventHook + RegisterHotKey)"]
-        Single["SingleInstanceGuard\n(Named Kernel Mutex)"]
-        Watcher["DirectoryWatcher\n(ReadDirectoryChangesW OVERLAPPED)"]
+        WinInt["DesktopIntegration\n(HWND_BOTTOM + WinEventHook + HotKeys)"]
+        Mutex["SingleInstanceGuard\n(Named Kernel Mutex)"]
+        Watcher["DirectoryWatcher\n(ReadDirectoryChangesW Overlapped I/O)"]
     end
 
-    subgraph Engine["Indexing, Extraction, Semantic & Search Engine"]
-        Indexer["FileIndexer\n(FindFirstFileExW + EcoQoS Throttling)"]
-        Extract["DocumentExtractor + DeflateCodec\n(.txt, .md, .docx, .pdf)"]
-        Sem["SemanticEmbeddingEngine + WordPieceTokenizer\n(Lazy LoadLibraryW ONNX CPU + all-MiniLM-L6-v2 INT8)"]
-        Search["FileSearchEngine\n(Hybrid Lexical + FTS5 + 384-D Cosine Vector Search)"]
+    subgraph Engine["Search & Intelligence Engine"]
+        Indexer["FileIndexer\n(Throttled Background Enumeration)"]
+        Extractor["DocumentExtractor + DeflateCodec\n(Zero-Dependency PDF, DOCX, MD, TXT)"]
+        Semantic["SemanticEngine + WordPieceTokenizer\n(Lazy-Loaded ONNX Runtime CPU + MiniLM-L6-v2)"]
+        Searcher["FileSearchEngine\n(Dual B-Tree + FTS5 BM25 + 384-D Cosine Hybrid)"]
     end
 
-    subgraph Storage["Embedded Storage (%LOCALAPPDATA%\\UshaLabs\\Lumen)"]
-        DB[("SQLite 3.47 WAL (Schema v3)\nfiles + files_fts (Trigram)\ndocument_content + document_fts (BM25)\ndocument_chunks (384-D float32 BLOBs)")]
-        Cfg["settings.json &\nRotating Logs (1 MB cap)"]
+    subgraph Storage["Embedded Local Storage (%LOCALAPPDATA%\\UshaLabs\\Lumen)"]
+        DB[("SQLite 3.47 WAL Database\nfiles + files_fts (Trigram)\ndocument_content + document_fts (BM25)\ndocument_chunks (384-D Vector BLOBs)")]
+        Config["settings.json &\nRotating Logs (1 MB cap)"]
     end
 
-    Bar --> Popup
-    Bar --> Search
     WinInt --> Bar
+    Bar --> Popup
+    Popup --> Preview
+    Settings --> Config
     Watcher --> Indexer
-    Indexer --> Extract
-    Indexer --> Sem
-    Extract --> DB
-    Sem --> DB
-    Search --> Sem
-    Search --> DB
-    Tray --> Cfg
+    Indexer --> Extractor
+    Indexer --> Semantic
+    Extractor --> DB
+    Semantic --> DB
+    Popup --> Searcher
+    Searcher --> DB
+    Searcher --> Semantic
 ```
-
----
-
-## Development Roadmap & Phase Status
-
-| Phase | Milestone | Status | Key Deliverables |
-|---|---|---|---|
-| **Phase 0** | **Native Foundation + Desktop Search Bar** | **Completed & Verified** | Native `WIN32` C++20/Qt6 executable, upper-right desktop search bar, Win32 `HWND_BOTTOM` + `Win+D` integration, `RegisterHotKey`, single-instance mutex, system tray, SQLite WAL + FTS5 schema, rotating logger |
-| **Phase 1** | **Ultrafast Filename Indexing** | **Completed & Verified** | `FindFirstFileExW` background enumeration, `ReadDirectoryChangesW` real-time watcher, 5,000-row batch SQLite reconciliation, B-tree prefix + FTS5 trigram search engine, relevance ranking, virtualized results UI |
-| **Phase 2** | **Document Content Search** | **Completed & Verified** | Zero-external-dependency native extractors for `.txt`, `.md`, `.docx` (ZIP + WordprocessingML), and multi-page `.pdf` (`/FlateDecode` + `BT...ET` parser + page offsets), RFC 1951/1950 Deflate with 16 MB ZIP-bomb cap, FTS5 `unicode61` BM25 content search, highlighted snippets & PDF page badges |
-| **Phase 3** | **Offline Semantic Search** | **Completed & Verified** | Lazy-loaded ONNX Runtime CPU inference (`all-MiniLM-L6-v2` INT8 quantized, 384-D), native BERT WordPiece tokenizer, 350-word overlapping document chunker, SQLite `document_chunks` vector store, hybrid lexical + semantic ranking, `findRelatedDocuments`, automatic memory unloading (`_heapmin` + `SetProcessWorkingSetSizeEx`) |
-| **Phase 4** | **Complete Desktop UX** | **Completed & Verified** | Interactive Search Modes (`All`, `Files`, `Content`, `Semantic` via `Tab` or pill click), inline filter syntax (`ext:`, `type:`, `in:`, `size:`, `modified:`), on-demand Quick Preview pane (`Ctrl+P`), right-click context menu, Reveal in Explorer (`Ctrl+Enter`), Copy Path (`Ctrl+Shift+C`), Find Similar Documents (`Ctrl+R`), Pinned Favorites (`Ctrl+D`), Desktop vs. Always-on-Top mode |
-| **Phase 5** | **Production Hardening + Microsoft Store** | **In Progress** | Database corruption self-healing, full settings suite, standalone Windows installer + MSIX package, full benchmark suite |
 
 ---
 
 ## Verified Performance Benchmarks
 
-### Benchmark Environment
-- **Hardware:** HP EliteBook 840 G8 Notebook PC
+All performance measurements were independently recorded under reproducible conditions on real consumer hardware.
+
+### Benchmark Hardware & Environment
+- **Device:** HP EliteBook 840 G8 Notebook PC
 - **Processor:** 11th Gen Intel Core i7-1185G7 @ 3.00 GHz (4 Cores / 8 Logical Processors)
 - **Memory:** 16.0 GB DDR4 (`15.69 GB` usable) · NVMe SSD
-- **OS:** Microsoft Windows 11 Pro x64 (`10.0.26200`, Build `26200`)
-- **Toolchain:** MSVC `19.44.35229.0` (Visual Studio 2022 v17.14.41, `Release /O2`) · Qt `6.8.2` (`msvc2022_64`)
+- **OS:** Microsoft Windows 11 Pro x64 (`10.0.26200`)
+- **Toolchain:** MSVC v143 (`Release /O2`) · Qt `6.8.2` (`msvc2022_64`)
 
-### Phase 0 — Foundation & Idle Resource Benchmarks
+### 1. System Overhead & Resource Footprint
 
 | Operation / Metric | Engineering Target | Measured Result | Status |
 |---|---|---|---|
 | **Warm Startup to Visible Desktop Bar** | `< 500 ms` | **`33.83 ms` avg** (`32.79 ms` – `36.41 ms` warm; `51.44 ms` cold) | **PASSED** (~14× faster) |
 | **Idle CPU (2-Minute Controlled Test)** | `< 0.1%` avg | **`0.0179%` avg** (`171.88 ms` CPU time across `120.06 s`) | **PASSED** (>5.5× under budget) |
 | **Idle Working Set RAM (Desktop Bar Visible)** | `< 120 MB` (`< 70 MB` stretch) | **`30.44 MB`** (`5.58 MB` Private Bytes) | **PASSED** (Beats stretch goal) |
-| **Standalone `Lumen.exe` Binary Size** | Compact | **`1.45 MB`** (statically embeds SQLite 3.47.2 + FTS5 + native extractors + WordPiece) | **VERIFIED** |
+| **Standalone `Lumen.exe` Binary Size** | Compact | **`1.45 MB`** (statically embeds SQLite 3.47.2 + FTS5 + extractors + tokenizer) | **VERIFIED** |
 
-### Phase 1 — 100,000-File Indexing & Search Benchmarks (`phase1_benchmark.exe`)
+### 2. High-Scale Filename Indexing & Query Latency (100,000 Files)
 
 | Operation / Metric | Engineering Target | Measured Result (100,000 Physical NTFS Files) | Status |
 |---|---|---|---|
@@ -137,27 +217,27 @@ flowchart LR
 | **Metadata + FTS5 Trigram Index Size** | `< 100 MB` | **`52.55 MB`** (`55,107,584 bytes`) | **PASSED** (47% below target) |
 | **Filename Search Latency — P50 (Median)** | Fast | **`4.89 ms`** (200 diverse warm-cache queries) | **PASSED** |
 | **Filename Search Latency — P95** | `< 50 ms` | **`10.89 ms`** (Min: `1.41 ms`, P99: `11.36 ms`, Max: `11.99 ms`) | **PASSED** (>4.5× faster) |
-| **Indexing Background CPU Usage** | Throttled | **`11.72%` avg** across 8 logical cores (`THREAD_PRIORITY_BELOW_NORMAL` + EcoQoS) | **PASSED** |
+| **Indexing Background CPU Usage** | Throttled | **`11.72%` avg** across 8 cores (`THREAD_PRIORITY_BELOW_NORMAL` + EcoQoS) | **PASSED** |
 | **RAM Usage During / After Indexing** | `< 250 MB` | **`21.73 MB` Working Set** (`Peak: 24.68 MB`, `Private: 8.47 MB`) | **PASSED** (>10× under budget) |
 | **Real-Time Incremental Update Latency** | Instant | **Add: `0.92 ms` · Rename: `0.48 ms` · Delete: `0.41 ms`** | **PASSED** |
 | **Post-Indexing Idle CPU** | `< 0.1%` | **`0.0000%`** | **PASSED** |
 | **Post-Indexing Idle Working Set RAM** | `< 120 MB` | **`27.05 MB`** (`14.35 MB` Private Bytes) | **PASSED** |
 
-### Phase 2 — Document Content Extraction & Full-Text Search Benchmarks (`phase2_benchmark.exe`)
+### 3. Deep Document Content Extraction & Full-Text Search (1,000 Documents)
 
-| Operation / Metric | Engineering Target | Measured Result (1,000 Physical Documents: 250 TXT, 250 MD, 250 DOCX, 250 3-Page PDF) | Status |
+| Operation / Metric | Engineering Target | Measured Result (1,000 Physical Documents: 250 TXT, 250 MD, 250 DOCX, 250 PDF) | Status |
 |---|---|---|---|
-| **End-to-End Indexing (Metadata + Content + FTS5)** | Background throttled | **`878.27 ms`** (`1,000 / 1,000` documents · **`1,138 docs/sec`**) | **PASSED** |
+| **End-to-End Content Indexing** | Background throttled | **`878.27 ms`** (`1,000 / 1,000` documents · **`1,138 docs/sec`**) | **PASSED** |
 | **Markdown (`.md`) Extraction Speed** | Fast | **`0.20 ms / doc`** (`50.55 ms` for 250 docs) | **PASSED** |
-| **PDF (`.pdf` 3-page `/FlateDecode`) Extraction Speed** | Fast | **`0.26 ms / doc`** (`66.18 ms` for 250 3-page PDFs with page offset tracking) | **PASSED** |
-| **Word (`.docx` ZIP + XML) Extraction Speed** | Fast | **`0.31 ms / doc`** (`77.43 ms` for 250 DOCX archives) | **PASSED** |
+| **PDF (`.pdf` 3-page `/FlateDecode`) Extraction** | Fast | **`0.26 ms / doc`** (`66.18 ms` for 250 3-page PDFs with page offset tracking) | **PASSED** |
+| **Word (`.docx` ZIP + XML) Extraction** | Fast | **`0.31 ms / doc`** (`77.43 ms` for 250 DOCX archives) | **PASSED** |
 | **Text (`.txt`) Extraction Speed** | Fast | **`10.15 ms / doc` cold** (`0.20 ms / doc` warm) | **PASSED** |
 | **Full-Text Search Latency — P50 (Median)** | Fast | **`4.70 ms`** (BM25 + `snippet()` + PDF page resolution) | **PASSED** |
 | **Full-Text Search Latency — P95** | `< 150 ms` | **`8.70 ms`** (Max: `10.63 ms` across 30 queries) | **PASSED** (>17× faster) |
 | **Content Index Storage Growth** | Compact | **`0.98 MB`** (`1.00 KB / document` including FTS5 inverted index) | **PASSED** |
 | **Full-Text Search Working Set RAM** | `< 250 MB` | **`18.14 MB` Working Set** (`5.52 MB` Private Bytes) | **PASSED** (>13× under budget) |
 
-### Phase 3 — Offline Semantic Search & ONNX Runtime CPU Benchmarks (`phase3_benchmark.exe`)
+### 4. On-Device Neural Semantic Search & Embedding Throughput
 
 | Operation / Metric | Engineering Target | Measured Result (`all-MiniLM-L6-v2` INT8 Quantized, 384-D, CPU Only) | Status |
 |---|---|---|---|
@@ -171,57 +251,43 @@ flowchart LR
 
 ---
 
-## Repository Structure
+## Installation & Distribution
 
-```text
-Lumen/
-├── CMakeLists.txt                  # C++20 / MSVC / Qt6 build configuration
-├── LICENSE                         # UshaLabs copyright & third-party notices
-├── README.md                       # Project documentation & verified benchmarks
-├── assets/
-│   ├── app.rc                      # Native Win32 VERSIONINFO & icon resource
-│   ├── branding/lumen_logo.svg     # UshaLabs Lumen vector emblem
-│   ├── icons/lumen.ico             # Multi-resolution Windows icon
-│   └── models/all-MiniLM-L6-v2/    # Bundled offline INT8 ONNX model (21.9 MB) & vocab.txt
-├── src/
-│   ├── main.cpp                    # Entry point, single-instance check, CLI harness
-│   ├── app/                        # LumenApplication & TrayController
-│   ├── core/                       # AppPaths, rotating Logger, SettingsManager
-│   ├── database/                   # DatabaseManager (SQLite3 WAL + FTS5 Schema v3)
-│   ├── extraction/                 # DocumentExtractor (.txt/.md/.docx/.pdf) & DeflateCodec
-│   ├── semantic/                   # SemanticEmbeddingEngine (ONNX CPU), WordPieceTokenizer, DocumentChunker
-│   ├── indexing/                   # FileIndexer (metadata + content + semantic passes) & DirectoryWatcher
-│   ├── search/                     # FileSearchEngine (Hybrid lexical + FTS5 + 384-D cosine vector search)
-│   ├── platform/windows/           # DesktopIntegration & SingleInstanceGuard
-│   └── ui/                         # DesktopSearchBar, SearchPopupWidget, SettingsDialog
-├── tests/
-│   ├── phase0_tests.cpp            # Phase 0 automated QtTest suite (10 tests)
-│   ├── phase1_tests.cpp            # Phase 1 automated QtTest suite (7 tests)
-│   ├── phase2_tests.cpp            # Phase 2 automated QtTest suite (7 tests)
-│   ├── phase3_tests.cpp            # Phase 3 automated QtTest suite (6 tests)
-│   └── phase4_tests.cpp            # Phase 4 automated QtTest suite (6 tests)
-├── benchmarks/
-│   ├── phase1_benchmark.cpp        # Reproducible 100,000-file NTFS filename benchmark
-│   ├── phase2_benchmark.cpp        # Reproducible 1,000-document content & FTS5 benchmark
-│   └── phase3_benchmark.cpp        # Reproducible 250-document ONNX CPU semantic benchmark
-├── third_party/
-│   ├── onnxruntime/                # ONNX Runtime v1.20.1 Windows x64 C/C++ headers & CPU runtime
-│   └── sqlite3/                    # Bundled SQLite 3.47.2 amalgamation
-└── docs/
-    └── screenshots/                # Verified native application screenshots
+Lumen is distributed as an official, cryptographically signed Windows MSIX package developed by **UshaLabs**.
+
+### Option 1: 1-Click Zero-Warning MSIX Installer (Recommended)
+
+1. Download **`Lumen-v0.5.0-MSIX-Bundle.zip`** from the [Releases](https://github.com/ushalabs/Lumen/releases) page.
+2. Extract the archive contents to any folder.
+3. Right-click **`Install-Lumen.bat`** and select **Run as administrator** (or run `Install-Lumen.ps1`).
+4. The installer automatically registers the official UshaLabs certificate in `TrustedPeople` and installs `Lumen-v0.5.0-x64.msix` directly into Windows.
+5. Windows App Installer will display **"Verified Publisher: UshaLabs"** with **zero security warnings**.
+
+### Option 2: PowerShell Direct Sideloading
+
+```powershell
+# 1. Trust the UshaLabs root certificate for sideloading (current user)
+Import-Certificate -FilePath .\UshaLabs.cer -CertStoreLocation Cert:\CurrentUser\TrustedPeople
+
+# 2. Deploy the MSIX package
+Add-AppxPackage -Path .\Lumen-v0.5.0-x64.msix
 ```
+
+### Option 3: Standalone Portable Archive
+
+Download **`Lumen-v0.5.0-windows-x64.zip`**, extract to any location, and launch `Lumen.exe`. No installation, system privileges, or registry modifications required.
 
 ---
 
 ## Building from Source
 
 ### Prerequisites
-- **OS:** Windows 10 or Windows 11 (x64)
-- **Compiler:** Visual Studio 2022 Build Tools (MSVC v143 x64 C++ compiler & Windows 10/11 SDK)
+- **Operating System:** Windows 10 or Windows 11 (x64)
+- **Compiler:** Visual Studio 2022 (MSVC v143 C++ compiler & Windows 10/11 SDK)
 - **Build System:** CMake 3.24+ and Ninja
 - **UI Framework:** Qt 6.8+ (`msvc2022_64`)
 
-### 1. Configure & Compile (`Release`)
+### 1. Compile in Release Mode
 
 ```bat
 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
@@ -229,14 +295,14 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/Q
 cmake --build build --config Release
 ```
 
-### 2. Run Automated Tests (36 Tests across Phases 0, 1, 2, 3, and 4)
+### 2. Run Automated Test Suite (36 Tests)
 
 ```powershell
 $env:PATH = "C:\Qt\6.8.2\msvc2022_64\bin;$env:PATH"
 ctest --test-dir build --output-on-failure -V
 ```
 
-### 3. Run the Phase 1, Phase 2 & Phase 3 Benchmarks
+### 3. Run Benchmark Suite
 
 ```powershell
 $env:PATH = "C:\Qt\6.8.2\msvc2022_64\bin;$env:PATH"
@@ -245,28 +311,29 @@ $env:PATH = "C:\Qt\6.8.2\msvc2022_64\bin;$env:PATH"
 .\build\phase3_benchmark.exe
 ```
 
-### 4. Build Windows Setup Package (Installer & Portable Bundle)
+### 4. Build MSIX Package & Installer Bundle
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File packaging\build_setup.ps1 -Version "0.5.0"
+powershell -ExecutionPolicy Bypass -File packaging\build_msix.ps1 -Version "0.5.0"
 ```
 
-Output artifacts generated in `dist/`:
-- **Installer:** `dist\Lumen-v0.5.0-Setup-x64.exe` (Solid LZMA compressed standalone installer, publisher: **UshaLabs**)
-- **Portable:** `dist\Lumen-v0.5.0-windows-x64.zip` (Pre-deployed folder with Qt6, ONNX Runtime, and MiniLM-L6-v2)
-- **Checksums:** `dist\SHA256SUMS.txt`
+Generates:
+- `dist\Lumen-v0.5.0-x64.msix` (Signed MSIX package, Publisher: **UshaLabs**)
+- `dist\Lumen-v0.5.0-MSIX-Bundle.zip` (1-click zero-warning installer bundle)
+- `dist\SHA256SUMS.txt` (Cryptographic verification checksums)
 
 ---
 
-## Privacy & Security Architecture
+## Privacy & Security
 
-- **Default Indexing Scope:** Only indexes user-approved personal folders on first run (`Documents`, `Downloads`, `Desktop`) resolved via Windows `SHGetKnownFolderPath`.
-- **Automatic Exclusions:** Ignores system directories (`Windows`, `Program Files`, `AppData`), developer caches (`.git`, `node_modules`, `venv`, `.venv`, `__pycache__`, `build`), and sensitive credential files (`.env`, `id_rsa`, `.pem`, `.key`, `.pfx`).
-- **Reparse Point Safety:** Skips `FILE_ATTRIBUTE_REPARSE_POINT` directories during enumeration to prevent symlink or NTFS junction loops.
-- **Local User-Scoped Storage:** All index databases, settings, and capped logs are stored strictly inside `%LOCALAPPDATA%\UshaLabs\Lumen\`.
+- **User-Approved Scopes Only:** Indexes only personal document libraries on initial launch (`Documents`, `Downloads`, `Desktop`) resolved dynamically via `SHGetKnownFolderPath`.
+- **Protected File Exclusions:** System directories (`Windows`, `Program Files`, `AppData`), development caches (`.git`, `node_modules`, `venv`, `target`, `build`), and sensitive keys (`.env`, `id_rsa`, `.pem`, `.key`, `.pfx`) are completely excluded from indexing.
+- **Reparse Point Guard:** Directory traversal strictly ignores `FILE_ATTRIBUTE_REPARSE_POINT` entries to prevent symlink or NTFS junction recursion loops.
+- **Sandboxed Local Storage:** User settings, database files, and size-capped rotating diagnostic logs reside exclusively inside `%LOCALAPPDATA%\UshaLabs\Lumen\`.
 
 ---
 
 ## License
 
-Copyright © 2026 **UshaLabs**. All rights reserved. See [LICENSE](LICENSE) for details.
+Copyright © 2026 **[UshaLabs](https://github.com/ushalabs)**. All rights reserved.  
+Released under the terms described in the [LICENSE](LICENSE) file.
