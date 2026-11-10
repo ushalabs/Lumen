@@ -78,7 +78,7 @@ private:
     bool m_hasCustomPosition = false;
     QPoint m_desktopBarPos{0, 0};
     bool m_startWithWindows = false;
-    QString m_appearancePreference = QStringLiteral("dark");
+    QString m_appearancePreference = QStringLiteral("light");
     QString m_globalShortcut = QStringLiteral("Ctrl+Alt+Space");
     IndexingSettingsPlaceholder m_indexing;
     QStringList m_pinnedFiles;

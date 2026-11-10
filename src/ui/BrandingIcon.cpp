@@ -104,7 +104,7 @@ void BrandingIcon::paintSearchIcon(QPainter* painter,
 void BrandingIcon::paintFileTypeIcon(QPainter* painter,
                                      const QRectF& targetRect,
                                      const QString& extensionLower,
-                                     bool darkTheme,
+                                     bool /*darkTheme*/,
                                      bool selected) {
     if (painter == nullptr || targetRect.isEmpty()) {
         return;
@@ -113,42 +113,30 @@ void BrandingIcon::paintFileTypeIcon(QPainter* painter,
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing, true);
 
-    const auto theme = ThemeTokens::get(darkTheme);
+    const auto theme = ThemeTokens::get(false);
     const qreal s = qMin(targetRect.width(), targetRect.height());
     const QRectF box(targetRect.center().x() - s * 0.5,
                      targetRect.center().y() - s * 0.5,
                      s,
                      s);
 
-    // Outer rounded icon container matching Gemini's 32x32 / 44x44 rounded-lg icon tile
+    // Clean light-pink rounded icon tile with crisp dark glyph
     const qreal tileRadius = qMax(6.0, s * 0.25);
-    QColor tileBg = darkTheme ? QColor(18, 12, 26, 220) : QColor(248, 249, 253);
-    QColor tileBorder = darkTheme ? QColor(236, 22, 128, 45) : QColor(220, 225, 236);
-    if (selected) {
-        tileBg = darkTheme ? QColor(236, 22, 128, 85) : QColor(251, 228, 239);
-        tileBorder = darkTheme ? QColor(253, 164, 175, 150) : theme.brandPink;
-    }
+    QColor tileBg = selected ? theme.brandPinkStrongFill : theme.brandPinkTint;
+    QColor tileBorder = selected ? theme.brandPink : theme.borderColor;
 
     painter->setPen(QPen(tileBorder, 1.0));
     painter->setBrush(tileBg);
     painter->drawRoundedRect(box, tileRadius, tileRadius);
 
-    // Determine accent color by extension
-    QColor glyphColor = selected ? (darkTheme ? QColor(255, 228, 236) : theme.brandPink) : theme.iconPrimary;
+    // High-contrast glyph color (always dark/black on light pink for effortless readability)
+    QColor glyphColor = theme.textPrimary;
     if (!selected) {
         if (extensionLower == QStringLiteral("pdf")) {
             glyphColor = theme.iconAccentPdf;
-        } else if (extensionLower == QStringLiteral("doc") || extensionLower == QStringLiteral("docx")) {
-            glyphColor = theme.iconAccentDoc;
         } else if (extensionLower == QStringLiteral("xls") || extensionLower == QStringLiteral("xlsx") ||
                    extensionLower == QStringLiteral("csv")) {
             glyphColor = theme.iconAccentSheet;
-        } else if (extensionLower == QStringLiteral("cpp") || extensionLower == QStringLiteral("h") ||
-                   extensionLower == QStringLiteral("hpp") || extensionLower == QStringLiteral("c") ||
-                   extensionLower == QStringLiteral("rs") || extensionLower == QStringLiteral("py") ||
-                   extensionLower == QStringLiteral("js") || extensionLower == QStringLiteral("ts") ||
-                   extensionLower == QStringLiteral("json")) {
-            glyphColor = theme.iconAccentCode;
         } else if (extensionLower == QStringLiteral("png") || extensionLower == QStringLiteral("jpg") ||
                    extensionLower == QStringLiteral("jpeg") || extensionLower == QStringLiteral("svg")) {
             glyphColor = theme.iconAccentImage;

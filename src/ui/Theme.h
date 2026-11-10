@@ -7,12 +7,13 @@
 namespace lumen::ui {
 
 struct ThemeTokens {
-    // Primary brand identity (Lumen / Downshift Pink #EC1680 + Gemini Rose/Pink accents)
+    // Primary brand identity (Single Pure White + Clean Light Pink + Black Text Theme)
     QColor brandPink;
     QColor brandPinkHover;
     QColor brandPinkLight;
     QColor brandPinkTint;
     QColor brandPinkSelected;
+    QColor brandPinkStrongFill;
     QColor brandPinkBorder;
 
     // Core typography
@@ -20,7 +21,7 @@ struct ThemeTokens {
     QColor textSecondary;
     QColor textMuted;
 
-    // Surfaces & structure (Gemini deep charcoal/plum & near-black interior panels)
+    // Surfaces & structure (Pure White & Soft Light Pink Panels)
     QColor surfaceBackground;
     QColor elevatedBackground;
     QColor windowBackground;

@@ -140,7 +140,7 @@ private:
     double m_lastQueryMs = 0.0;
     search::SearchMode m_searchMode = search::SearchMode::All;
     bool m_previewVisible = false;
-    bool m_darkTheme = true;
+    bool m_darkTheme = false;
     bool m_indexingInProgress = false;
 
     SearchResultListModel* m_model = nullptr;

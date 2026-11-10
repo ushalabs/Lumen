@@ -121,60 +121,18 @@ bool isSourceCodeExtension(const QString& extLower) {
 
 QString sectionCategoryName(const search::FileSearchResult& item) {
     if (item.isPinned) {
-        return QStringLiteral("PINNED FAVORITES");
+        return QStringLiteral("PINNED");
     }
     switch (item.matchType) {
         case search::SearchResultMatchType::Semantic:
-            return QStringLiteral("SEMANTIC IN-FILE MATCHES");
+            return QStringLiteral("SEMANTIC MATCHES");
         case search::SearchResultMatchType::Hybrid:
-            return QStringLiteral("HYBRID SEMANTIC & CONTENT MATCHES");
         case search::SearchResultMatchType::Content:
         case search::SearchResultMatchType::FilenameAndContent:
-            return QStringLiteral("IN-FILE CONTENT MATCHES");
+            return QStringLiteral("CONTENT MATCHES");
         case search::SearchResultMatchType::Filename:
         default:
-            return QStringLiteral("FILES & DOCUMENTS");
-    }
-}
-
-QString matchTypeBadgeLabel(const search::FileSearchResult& item) {
-    switch (item.matchType) {
-        case search::SearchResultMatchType::Semantic:
-            if (item.semanticSimilarity > 0.0f) {
-                return QStringLiteral("Cosine %1").arg(item.semanticSimilarity, 0, 'f', 2);
-            }
-            return QStringLiteral("Semantic");
-        case search::SearchResultMatchType::Hybrid:
-            if (item.semanticSimilarity > 0.0f) {
-                return QStringLiteral("Hybrid · %1").arg(item.semanticSimilarity, 0, 'f', 2);
-            }
-            return QStringLiteral("Hybrid Match");
-        case search::SearchResultMatchType::FilenameAndContent:
-            return (item.matchedPage > 0)
-                       ? QStringLiteral("Page %1 · Content").arg(item.matchedPage)
-                       : QStringLiteral("Name + Content");
-        case search::SearchResultMatchType::Content:
-            return (item.matchedPage > 0)
-                       ? QStringLiteral("Page %1 Match").arg(item.matchedPage)
-                       : QStringLiteral("Content Match");
-        case search::SearchResultMatchType::Filename:
-        default:
-            return QStringLiteral("Filename Match");
-    }
-}
-
-QString matchSourceDescription(const search::FileSearchResult& item) {
-    switch (item.matchType) {
-        case search::SearchResultMatchType::Semantic:
-            return QStringLiteral("Semantic (MiniLM-L6)");
-        case search::SearchResultMatchType::Hybrid:
-            return QStringLiteral("Hybrid (FTS5 + Vector)");
-        case search::SearchResultMatchType::Content:
-        case search::SearchResultMatchType::FilenameAndContent:
-            return QStringLiteral("SQLite FTS5 BM25");
-        case search::SearchResultMatchType::Filename:
-        default:
-            return QStringLiteral("Filename Index");
+            return QStringLiteral("FILES");
     }
 }
 
@@ -253,11 +211,11 @@ void drawHighlightedSnippet(QPainter* painter,
 
         if (seg.highlighted && !drawText.isEmpty()) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(theme.brandPinkTint);
+            painter->setBrush(theme.brandPinkStrongFill);
             painter->drawRoundedRect(
                 QRectF(curX - 1.0, rect.top() + 1.0, advance + 2.0, rect.height() - 2.0), 3.0, 3.0);
             painter->setFont(mediumFont);
-            painter->setPen(theme.brandPinkLight);
+            painter->setPen(theme.textPrimary);
         } else {
             painter->setFont(normalFont);
             painter->setPen(theme.textSecondary);
@@ -379,19 +337,18 @@ public:
         painter->setRenderHint(QPainter::Antialiasing, true);
         painter->setRenderHint(QPainter::TextAntialiasing, true);
 
-        const auto theme = ThemeTokens::get(m_darkTheme);
+        const auto theme = ThemeTokens::get(false);
         const QString groupTitle = index.data(SearchResultListModel::GroupHeaderTitleRole).toString();
         const int groupCount = index.data(SearchResultListModel::GroupHeaderCountRole).toInt();
 
         QRectF fullRect = QRectF(option.rect);
         if (!groupTitle.isEmpty()) {
-            // Draw Gemini uppercase group section header ("SEMANTIC IN-FILE MATCHES   2")
             const QRectF hdrRect(fullRect.left() + 14.0,
                                  fullRect.top() + 4.0,
                                  fullRect.width() - 28.0,
                                  SearchPopupWidget::kGroupHeaderExtraHeight - 4.0);
-            painter->setFont(ThemeTokens::makeMonoFont(10, QFont::DemiBold));
-            painter->setPen(theme.brandPinkLight);
+            painter->setFont(ThemeTokens::makeFont(10, QFont::DemiBold));
+            painter->setPen(theme.textSecondary);
             painter->drawText(hdrRect, Qt::AlignLeft | Qt::AlignVCenter, groupTitle);
 
             painter->setFont(ThemeTokens::makeMonoFont(10, QFont::Normal));
@@ -405,26 +362,18 @@ public:
         const bool isSelected = (option.state & QStyle::State_Selected) != 0;
         const bool isHovered = (option.state & QStyle::State_MouseOver) != 0;
 
-        // Card background & pink selection border matching Gemini's `from-rose-500/30 via-pink-500/15`
+        // Pure White & Clean Light Pink Result Card
         if (isSelected) {
-            if (m_darkTheme) {
-                QLinearGradient selGrad(cardRect.topLeft(), cardRect.topRight());
-                selGrad.setColorAt(0.0, QColor(236, 22, 128, 72));
-                selGrad.setColorAt(0.55, QColor(236, 22, 128, 32));
-                selGrad.setColorAt(1.0, QColor(15, 10, 20, 60));
-                painter->setBrush(selGrad);
-            } else {
-                painter->setBrush(theme.brandPinkSelected);
-            }
-            painter->setPen(QPen(theme.brandPinkBorder, 1.2));
+            painter->setBrush(theme.brandPinkSelected);
+            painter->setPen(QPen(theme.brandPink, 1.3));
             painter->drawRoundedRect(cardRect, 10.0, 10.0);
         } else if (isHovered) {
-            painter->setPen(QPen(theme.borderSubtle, 1.0));
-            painter->setBrush(theme.hoverSurface);
+            painter->setPen(QPen(theme.borderColor, 1.0));
+            painter->setBrush(theme.brandPinkTint);
             painter->drawRoundedRect(cardRect, 10.0, 10.0);
         } else {
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(m_darkTheme ? QColor(0, 0, 0, 75) : theme.elevatedBackground);
+            painter->setPen(QPen(theme.borderSubtle, 1.0));
+            painter->setBrush(theme.surfaceBackground);
             painter->drawRoundedRect(cardRect, 10.0, 10.0);
         }
 
@@ -436,20 +385,17 @@ public:
         const int matchLen = index.data(SearchResultListModel::MatchLengthRole).toInt();
         const QString snippet = index.data(SearchResultListModel::SnippetRole).toString();
         const int matchedPage = index.data(SearchResultListModel::MatchedPageRole).toInt();
-        const float semSim = index.data(SearchResultListModel::SemanticSimilarityRole).toFloat();
         const bool isPinned = index.data(SearchResultListModel::IsPinnedRole).toBool();
-        const auto matchType = static_cast<search::SearchResultMatchType>(
-            index.data(SearchResultListModel::MatchTypeRole).toInt());
 
-        // 1. Left 32x32 rounded file icon tile
+        // 1. Left 32x32 rounded light-pink file icon tile
         const QRectF iconBox(cardRect.left() + 10.0, cardRect.top() + 10.0, 32.0, 32.0);
-        BrandingIcon::paintFileTypeIcon(painter, iconBox, ext, m_darkTheme, isSelected);
+        BrandingIcon::paintFileTypeIcon(painter, iconBox, ext, false, isSelected);
 
         const qreal textLeft = iconBox.right() + 10.0;
         const qreal rightMargin = cardRect.right() - 10.0;
         const qreal availWidth = std::max(80.0, rightMargin - textLeft);
 
-        // 2. Right-side file size in monospaced font
+        // 2. Right-side file size
         const QFont monoSmall = ThemeTokens::makeMonoFont(10, QFont::Normal);
         const QFontMetrics fmMonoSmall(monoSmall);
         const QString sizeStr = formatHumanSize(fileSize);
@@ -462,24 +408,23 @@ public:
 
         int rightReserved = sizeW + 8;
 
-        // 3. Match category pill next to filename (real match type / cosine / page)
-        search::FileSearchResult tempItem;
-        tempItem.matchType = matchType;
-        tempItem.matchedPage = matchedPage;
-        tempItem.semanticSimilarity = semSim;
-        QString badgeText = matchTypeBadgeLabel(tempItem);
+        // 3. Optional subtle badge ONLY for Pinned or specific PDF Page (no Filename Match / Cosine!)
+        QString badgeText;
         if (isPinned) {
-            badgeText = QStringLiteral("Pinned · ") + badgeText;
+            badgeText = (matchedPage > 0) ? QStringLiteral("Pinned · p.%1").arg(matchedPage) : QStringLiteral("Pinned");
+        } else if (matchedPage > 0) {
+            badgeText = QStringLiteral("Page %1").arg(matchedPage);
         }
 
-        const QFont badgeFont = ThemeTokens::makeMonoFont(9, QFont::Medium);
+        const QFont badgeFont = ThemeTokens::makeFont(10, QFont::Medium);
         const QFontMetrics fmBadge(badgeFont);
-        const int badgeW = fmBadge.horizontalAdvance(badgeText) + 12;
+        const int badgeW = badgeText.isEmpty() ? 0 : (fmBadge.horizontalAdvance(badgeText) + 14);
+        const int badgeGap = badgeText.isEmpty() ? 0 : 8;
 
-        // 4. Filename on Line 1
+        // 4. Filename on Line 1 (Crisp Black)
         const QFont nameFont = ThemeTokens::makeFont(12, QFont::DemiBold);
         const QFontMetrics fmName(nameFont);
-        const int maxNameW = std::max(60, static_cast<int>(availWidth - rightReserved - badgeW - 8));
+        const int maxNameW = std::max(60, static_cast<int>(availWidth - rightReserved - badgeW - badgeGap));
         const QString elidedName = fmName.elidedText(fileName, Qt::ElideMiddle, maxNameW);
         const int actualNameW = fmName.horizontalAdvance(elidedName);
 
@@ -489,7 +434,7 @@ public:
             const int hlX = static_cast<int>(textLeft) + fmName.horizontalAdvance(prefix);
             const int hlW = fmName.horizontalAdvance(fileName.mid(matchStart, matchLen));
             painter->setPen(Qt::NoPen);
-            painter->setBrush(theme.brandPinkTint);
+            painter->setBrush(theme.brandPinkStrongFill);
             painter->drawRoundedRect(QRectF(hlX - 1.0, cardRect.top() + 9.0, hlW + 2.0, 16.0), 3.0, 3.0);
         }
 
@@ -499,15 +444,16 @@ public:
                           Qt::AlignLeft | Qt::AlignVCenter,
                           elidedName);
 
-        // Draw the match badge right after the filename
-        const qreal badgeLeft = std::min(textLeft + actualNameW + 8.0, rightMargin - rightReserved - badgeW);
-        const QRectF badgeRect(badgeLeft, cardRect.top() + 9.0, badgeW, 16.0);
-        painter->setPen(QPen(theme.brandPinkBorder, 1.0));
-        painter->setBrush(theme.brandPinkTint);
-        painter->drawRoundedRect(badgeRect, 4.0, 4.0);
-        painter->setFont(badgeFont);
-        painter->setPen(theme.brandPinkLight);
-        painter->drawText(badgeRect, Qt::AlignCenter, badgeText);
+        if (!badgeText.isEmpty()) {
+            const qreal badgeLeft = std::min(textLeft + actualNameW + 8.0, rightMargin - rightReserved - badgeW);
+            const QRectF badgeRect(badgeLeft, cardRect.top() + 9.0, badgeW, 17.0);
+            painter->setPen(QPen(theme.borderColor, 1.0));
+            painter->setBrush(theme.brandPinkStrongFill);
+            painter->drawRoundedRect(badgeRect, 5.0, 5.0);
+            painter->setFont(badgeFont);
+            painter->setPen(theme.textPrimary);
+            painter->drawText(badgeRect, Qt::AlignCenter, badgeText);
+        }
 
         // 5. Line 2: Monospaced Windows path
         const QFont pathFont = ThemeTokens::makeMonoFont(10, QFont::Normal);
@@ -559,9 +505,9 @@ SearchPopupWidget::SearchPopupWidget(QWidget* parent)
     m_listView->viewport()->setAutoFillBackground(false);
     m_listView->setStyleSheet(QStringLiteral(
         "QListView { background: transparent; border: none; outline: none; }"
-        "QScrollBar:vertical { width: 5px; background: rgba(0, 0, 0, 40); margin: 4px 2px; border-radius: 2px; }"
-        "QScrollBar::handle:vertical { background: rgba(236, 22, 128, 95); border-radius: 2px; min-height: 24px; }"
-        "QScrollBar::handle:vertical:hover { background: rgba(255, 51, 119, 180); }"
+        "QScrollBar:vertical { width: 5px; background: #FDF2F8; margin: 4px 2px; border-radius: 2px; }"
+        "QScrollBar::handle:vertical { background: #F472B6; border-radius: 2px; min-height: 24px; }"
+        "QScrollBar::handle:vertical:hover { background: #EC1680; }"
         "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"));
     m_listView->hide();
 
@@ -757,8 +703,8 @@ QString SearchPopupWidget::statusHeadline() const {
 }
 
 int SearchPopupWidget::leftPaneWidth() const noexcept {
-    // 58% left results pane / 42% right inspector pane (matching Gemini's 7/12 vs 5/12 grid)
-    return std::max(260, (width() * 58) / 100);
+    // 54% left results pane / 46% right summary & details pane
+    return std::max(260, (width() * 54) / 100);
 }
 
 void SearchPopupWidget::resizeEvent(QResizeEvent* event) {
@@ -775,7 +721,7 @@ void SearchPopupWidget::updateListLayout() {
 }
 
 QRectF SearchPopupWidget::modePillRect(int modeIndex) const {
-    static const int widths[4] = {96, 72, 92, 114};
+    static const int widths[4] = {80, 72, 86, 92};
     qreal x = 18.0;
     for (int i = 0; i < modeIndex && i < 4; ++i) {
         x += widths[i] + 6.0;
@@ -794,27 +740,28 @@ QRectF SearchPopupWidget::inspectorPaneRect() const {
 }
 
 QRectF SearchPopupWidget::inspectorCopyPathButtonRect(const QRectF& inspRect) const {
-    return QRectF(inspRect.right() - 40.0, inspRect.top() + 86.0, 26.0, 22.0);
+    return QRectF(inspRect.right() - 14.0 - 44.0, inspRect.top() + 98.0, 40.0, 22.0);
 }
 
 QRectF SearchPopupWidget::inspectorOpenButtonRect(const QRectF& inspRect) const {
-    const qreal barTop = inspRect.bottom() - 38.0;
-    return QRectF(inspRect.left() + 12.0, barTop, 96.0, 28.0);
+    const qreal barTop = inspRect.bottom() - 39.0;
+    return QRectF(inspRect.left() + 14.0, barTop, 84.0, 28.0);
 }
 
 QRectF SearchPopupWidget::inspectorRevealButtonRect(const QRectF& inspRect) const {
-    const qreal barTop = inspRect.bottom() - 38.0;
-    return QRectF(inspRect.left() + 114.0, barTop, 86.0, 28.0);
+    const qreal barTop = inspRect.bottom() - 39.0;
+    return QRectF(inspRect.left() + 106.0, barTop, 84.0, 28.0);
 }
 
 QRectF SearchPopupWidget::inspectorRelatedButtonRect(const QRectF& inspRect) const {
-    const qreal barTop = inspRect.bottom() - 38.0;
-    return QRectF(inspRect.left() + 206.0, barTop, 92.0, 28.0);
+    const qreal barTop = inspRect.bottom() - 39.0;
+    return QRectF(inspRect.left() + 198.0, barTop, 84.0, 28.0);
 }
 
 QRectF SearchPopupWidget::inspectorPinButtonRect(const QRectF& inspRect) const {
-    const qreal barTop = inspRect.bottom() - 38.0;
-    return QRectF(inspRect.left() + 304.0, barTop, std::max(54.0, inspRect.right() - 12.0 - (inspRect.left() + 304.0)), 28.0);
+    const qreal barTop = inspRect.bottom() - 39.0;
+    const qreal leftX = inspRect.left() + 290.0;
+    return QRectF(leftX, barTop, std::max(60.0, inspRect.right() - 14.0 - leftX), 28.0);
 }
 
 void SearchPopupWidget::mousePressEvent(QMouseEvent* event) {
@@ -874,25 +821,24 @@ void SearchPopupWidget::mousePressEvent(QMouseEvent* event) {
 }
 
 void SearchPopupWidget::showContextMenuAt(const QPoint& localPos, const search::FileSearchResult& item) {
-    const auto theme = ThemeTokens::get(m_darkTheme);
+    const auto theme = ThemeTokens::get(false);
     QMenu menu(this);
     menu.setStyleSheet(QStringLiteral(
         "QMenu { background-color: %1; color: %2; border: 1px solid %3; border-radius: 8px; padding: 5px; font-family: 'Segoe UI'; font-size: 9pt; }"
-        "QMenu::item { padding: 6px 22px 6px 12px; border-radius: 5px; }"
-        "QMenu::item:selected { background-color: %4; color: %5; font-weight: 600; }"
-        "QMenu::separator { height: 1px; background: %6; margin: 4px 8px; }")
-        .arg(theme.elevatedBackground.name(),
+        "QMenu::item { padding: 6px 22px 6px 12px; border-radius: 5px; color: %2; }"
+        "QMenu::item:selected { background-color: %4; color: %2; font-weight: 600; }"
+        "QMenu::separator { height: 1px; background: %5; margin: 4px 8px; }")
+        .arg(theme.surfaceBackground.name(),
              theme.textPrimary.name(),
-             theme.brandPinkBorder.name(),
+             theme.borderColor.name(),
              theme.brandPinkSelected.name(),
-             theme.brandPinkLight.name(),
              theme.borderSubtle.name()));
 
     QAction* openAct = menu.addAction(QStringLiteral("Open File\tEnter"));
     QAction* revealAct = menu.addAction(QStringLiteral("Reveal in File Explorer\tCtrl+Enter"));
     QAction* previewAct = menu.addAction(m_previewVisible
-                                             ? QStringLiteral("Compact Inspector View\tCtrl+P")
-                                             : QStringLiteral("Expand Inspector View\tCtrl+P"));
+                                             ? QStringLiteral("Compact Summary View\tCtrl+P")
+                                             : QStringLiteral("Expand Summary View\tCtrl+P"));
     menu.addSeparator();
     QAction* relatedAct = menu.addAction(QStringLiteral("Find Related Documents\tCtrl+R"));
     const bool pinned = core::SettingsManager::instance().isFilePinned(item.path);
@@ -900,7 +846,7 @@ void SearchPopupWidget::showContextMenuAt(const QPoint& localPos, const search::
                                          ? QStringLiteral("Unpin from Favorites\tCtrl+D")
                                          : QStringLiteral("Pin to Favorites\tCtrl+D"));
     menu.addSeparator();
-    QAction* copyPathAct = menu.addAction(QStringLiteral("Copy Full Path\tCtrl+Shift+C"));
+    QAction* copyPathAct = menu.addAction(QStringLiteral("Copy Path\tCtrl+Shift+C"));
     QAction* copyNameAct = menu.addAction(QStringLiteral("Copy Filename"));
 
     QAction* chosen = menu.exec(mapToGlobal(localPos));
@@ -928,45 +874,56 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.setRenderHint(QPainter::TextAntialiasing, true);
 
-    const auto theme = ThemeTokens::get(m_darkTheme);
-    const QRectF bounds = QRectF(rect()).adjusted(1.0, 0.0, -1.0, -1.0);
+    const auto theme = ThemeTokens::get(false);
+    const QRectF bounds = QRectF(rect()).adjusted(2.0, 0.0, -2.0, -2.0);
+
+    // Clip interior fills so parent's 16px rounded pink border remains crisp along the bottom corners
+    QPainterPath clipPath;
+    const qreal r = 14.0;
+    clipPath.moveTo(bounds.left(), bounds.top());
+    clipPath.lineTo(bounds.right(), bounds.top());
+    clipPath.lineTo(bounds.right(), bounds.bottom() - r);
+    clipPath.quadTo(bounds.right(), bounds.bottom(), bounds.right() - r, bounds.bottom());
+    clipPath.lineTo(bounds.left() + r, bounds.bottom());
+    clipPath.quadTo(bounds.left(), bounds.bottom(), bounds.left(), bounds.bottom() - r);
+    clipPath.closeSubpath();
+    painter.setClipPath(clipPath);
 
     // -------------------------------------------------------------------------
-    // 1. Filter Bar & Real-Time Query Metrics Header (Gemini style)
+    // 1. Clean Filter Bar Header (Pure White & Light Pink)
     // -------------------------------------------------------------------------
     const QRectF filterHeaderRect(bounds.left(), 0.0, bounds.width(), kHeaderHeight);
     painter.setPen(Qt::NoPen);
-    painter.setBrush(m_darkTheme ? QColor(0, 0, 0, 105) : theme.elevatedBackground);
+    painter.setBrush(theme.surfaceBackground);
     painter.drawRect(filterHeaderRect);
 
     if (!m_relatedSourceFileName.isEmpty()) {
         painter.setFont(ThemeTokens::makeFont(12, QFont::DemiBold));
-        painter.setPen(theme.brandPinkLight);
+        painter.setPen(theme.textPrimary);
         const QFontMetrics fm(painter.font());
         const QString banner = fm.elidedText(
-            QStringLiteral("Related Documents to: %1").arg(m_relatedSourceFileName),
+            QStringLiteral("Related to: %1").arg(m_relatedSourceFileName),
             Qt::ElideMiddle,
             width() - 125);
         painter.drawText(QRectF(18.0, 8.0, width() - 125.0, 28.0), Qt::AlignLeft | Qt::AlignVCenter, banner);
 
         const QRectF backRect = backButtonRect();
-        painter.setPen(QPen(theme.brandPinkBorder, 1.0));
-        painter.setBrush(theme.brandPinkTint);
+        painter.setPen(QPen(theme.brandPink, 1.0));
+        painter.setBrush(theme.brandPinkSelected);
         painter.drawRoundedRect(backRect, 6.0, 6.0);
-        painter.setFont(ThemeTokens::makeMonoFont(11, QFont::Medium));
-        painter.setPen(theme.brandPinkLight);
+        painter.setFont(ThemeTokens::makeFont(11, QFont::DemiBold));
+        painter.setPen(theme.textPrimary);
         painter.drawText(backRect, Qt::AlignCenter, QStringLiteral("← Back"));
     } else {
-        // Segmented dark pill track containing the 4 real Lumen search modes
-        const QRectF trackRect(14.0, 5.0, 400.0, 34.0);
+        const QRectF trackRect(14.0, 5.0, 356.0, 34.0);
         painter.setPen(QPen(theme.borderSubtle, 1.0));
-        painter.setBrush(m_darkTheme ? QColor(0, 0, 0, 130) : theme.surfaceBackground);
+        painter.setBrush(theme.brandPinkTint);
         painter.drawRoundedRect(trackRect, 9.0, 9.0);
 
         static const QString kModeLabels[4] = {
-            QStringLiteral("All Matches"),
+            QStringLiteral("All"),
             QStringLiteral("Files"),
-            QStringLiteral("In-File Text"),
+            QStringLiteral("Content"),
             QStringLiteral("Semantic")
         };
 
@@ -974,11 +931,11 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
             const QRectF pRect = modePillRect(i);
             const bool active = (static_cast<int>(m_searchMode) == i);
             if (active) {
-                painter.setPen(QPen(theme.brandPinkBorder, 1.0));
-                painter.setBrush(theme.brandPinkSelected);
+                painter.setPen(QPen(theme.brandPink, 1.0));
+                painter.setBrush(theme.brandPinkStrongFill);
                 painter.drawRoundedRect(pRect, 6.0, 6.0);
                 painter.setFont(ThemeTokens::makeFont(11, QFont::DemiBold));
-                painter.setPen(theme.brandPinkLight);
+                painter.setPen(theme.textPrimary);
             } else {
                 painter.setFont(ThemeTokens::makeFont(11, QFont::Medium));
                 painter.setPen(theme.textSecondary);
@@ -986,43 +943,28 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
             painter.drawText(pRect, Qt::AlignCenter, kModeLabels[i]);
         }
 
-        // Right-side real latency & real SQLite WAL / FTS5 status
-        const QFont metricFont = ThemeTokens::makeMonoFont(11, QFont::Medium);
-        painter.setFont(metricFont);
-        const QString metricStr = (resultCount() > 0)
-                                      ? QStringLiteral("%1 %2 (~%3 ms)")
-                                            .arg(resultCount())
-                                            .arg(resultCount() == 1 ? QStringLiteral("result") : QStringLiteral("results"))
-                                            .arg(m_lastQueryMs, 0, 'f', 2)
-                                      : (m_queryText.isEmpty()
-                                             ? QStringLiteral("%1 indexed files")
-                                                   .arg(database::DatabaseManager::instance().fileCount())
-                                             : QStringLiteral("0 results"));
-
-        const QString dbReadyStr = QStringLiteral("  •  SQLite FTS5 Ready");
-        const QFontMetrics fmMetric(metricFont);
-        const int dbW = fmMetric.horizontalAdvance(dbReadyStr);
-        const int metricW = fmMetric.horizontalAdvance(metricStr);
-
-        painter.setPen(QColor(52, 211, 153)); // Emerald-400 status
-        painter.drawText(QRectF(bounds.right() - dbW - 16.0, 0.0, dbW, kHeaderHeight),
-                         Qt::AlignRight | Qt::AlignVCenter,
-                         dbReadyStr);
-
-        painter.setPen(theme.brandPinkLight);
-        painter.drawText(QRectF(bounds.right() - dbW - metricW - 18.0, 0.0, metricW + 4, kHeaderHeight),
-                         Qt::AlignRight | Qt::AlignVCenter,
-                         metricStr);
+        // Right-side simple result count ONLY (NO timing ms, NO SQLite FTS5 Ready!)
+        if (!m_queryText.isEmpty()) {
+            const QFont countFont = ThemeTokens::makeFont(11, QFont::Medium);
+            painter.setFont(countFont);
+            const QString countStr = (resultCount() == 1)
+                                         ? QStringLiteral("1 result")
+                                         : QStringLiteral("%1 results").arg(resultCount());
+            painter.setPen(theme.textSecondary);
+            painter.drawText(QRectF(bounds.right() - 150.0, 0.0, 134.0, kHeaderHeight),
+                             Qt::AlignRight | Qt::AlignVCenter,
+                             countStr);
+        }
     }
 
-    // Header bottom divider
+    // Header bottom hairline divider
     painter.setPen(QPen(theme.borderSubtle, 1.0));
     painter.drawLine(QPointF(bounds.left(), kHeaderHeight), QPointF(bounds.right(), kHeaderHeight));
 
     const qreal footerTop = bounds.bottom() - kFooterHeight;
 
     // -------------------------------------------------------------------------
-    // 2. Empty State (when resultCount() == 0)
+    // 2. Empty State (when typed query has 0 matches)
     // -------------------------------------------------------------------------
     if (resultCount() == 0) {
         const QRectF bodyRect(bounds.left(), kHeaderHeight, bounds.width(), footerTop - kHeaderHeight);
@@ -1031,31 +973,28 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
         const QFont titleFont = ThemeTokens::makeFont(13, QFont::DemiBold);
         painter.setFont(titleFont);
         painter.setPen(theme.textPrimary);
-        const QString headline = m_queryText.isEmpty()
-                                     ? QStringLiteral("Start typing to search your files, content, and concepts")
-                                     : statusHeadline();
         painter.drawText(QRectF(bounds.left() + 24.0, center.y() - 22.0, bounds.width() - 48.0, 22.0),
                          Qt::AlignCenter,
-                         headline);
+                         statusHeadline());
 
         const QFont subFont = ThemeTokens::makeFont(12, QFont::Normal);
         painter.setFont(subFont);
         painter.setPen(theme.textSecondary);
         const QString subtitle = (database::DatabaseManager::instance().fileCount() == 0)
                                      ? (m_indexingInProgress
-                                            ? QStringLiteral("Scanning approved folders in the background...")
-                                            : QStringLiteral("Local file index is initializing."))
-                                     : QStringLiteral("Use Tab to switch modes or filters like ext:pdf, type:code, modified:7d");
+                                            ? QStringLiteral("Scanning your folders in the background...")
+                                            : QStringLiteral("Index is initializing."))
+                                     : QStringLiteral("Try different keywords or switch search mode with Tab");
         painter.drawText(QRectF(bounds.left() + 24.0, center.y() + 2.0, bounds.width() - 48.0, 20.0),
                          Qt::AlignCenter,
                          subtitle);
     } else {
         // ---------------------------------------------------------------------
-        // 3. Dual-Column Split: Left Results | Right Real File Inspector
+        // 3. Dual-Column Split: Left Results | Right Summary & File Details
         // ---------------------------------------------------------------------
         const QRectF inspRect = inspectorPaneRect();
 
-        // Inspector background & vertical divider
+        // Pure White right pane & crisp light-pink vertical divider
         painter.setPen(Qt::NoPen);
         painter.setBrush(theme.inspectorBackground);
         painter.drawRect(inspRect);
@@ -1069,192 +1008,139 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
             const qreal contentWidth = inspRect.width() - pad * 2.0;
             const QString extLower = sel->extension.toLower();
 
-            // A. Inspector File Header (42x42 icon + Filename + Match Badge + Human-readable Type)
-            const QRectF hdrIconRect(contentLeft, inspRect.top() + 12.0, 42.0, 42.0);
-            BrandingIcon::paintFileTypeIcon(&painter, hdrIconRect, extLower, m_darkTheme, true);
+            // A. Clean File Header (42x42 icon + Filename + Human File Type — NO Match Badge!)
+            const QRectF hdrIconRect(contentLeft, inspRect.top() + 14.0, 42.0, 42.0);
+            BrandingIcon::paintFileTypeIcon(&painter, hdrIconRect, extLower, false, true);
 
-            const qreal titleLeft = hdrIconRect.right() + 10.0;
+            const qreal titleLeft = hdrIconRect.right() + 12.0;
             const qreal titleAvailW = inspRect.right() - pad - titleLeft;
 
-            const QString matchLabel = matchTypeBadgeLabel(*sel);
-            const QFont badgeFont = ThemeTokens::makeMonoFont(10, QFont::Medium);
-            const QFontMetrics fmBadge(badgeFont);
-            const int badgeW = fmBadge.horizontalAdvance(matchLabel) + 14;
-            const QRectF matchPillRect(inspRect.right() - pad - badgeW, inspRect.top() + 13.0, badgeW, 18.0);
-
-            painter.setPen(QPen(theme.brandPinkBorder, 1.0));
-            painter.setBrush(theme.brandPinkTint);
-            painter.drawRoundedRect(matchPillRect, 9.0, 9.0);
-            painter.setFont(badgeFont);
-            painter.setPen(theme.brandPinkLight);
-            painter.drawText(matchPillRect, Qt::AlignCenter, matchLabel);
-
-            const QFont titleFont = ThemeTokens::makeFont(13, QFont::Bold);
+            const QFont titleFont = ThemeTokens::makeFont(14, QFont::Bold);
             painter.setFont(titleFont);
             painter.setPen(theme.textPrimary);
             const QFontMetrics fmTitle(titleFont);
-            const int maxTitleW = std::max(60, static_cast<int>(titleAvailW - badgeW - 8.0));
-            painter.drawText(QRectF(titleLeft, inspRect.top() + 12.0, maxTitleW, 20.0),
+            painter.drawText(QRectF(titleLeft, inspRect.top() + 15.0, titleAvailW, 20.0),
                              Qt::AlignLeft | Qt::AlignVCenter,
-                             fmTitle.elidedText(sel->name, Qt::ElideMiddle, maxTitleW));
+                             fmTitle.elidedText(sel->name, Qt::ElideMiddle, static_cast<int>(titleAvailW)));
 
-            const QFont typeFont = ThemeTokens::makeMonoFont(11, QFont::Normal);
+            const QFont typeFont = ThemeTokens::makeFont(11, QFont::Normal);
             painter.setFont(typeFont);
-            painter.setPen(theme.brandPinkLight);
-            painter.drawText(QRectF(titleLeft, inspRect.top() + 33.0, titleAvailW, 18.0),
+            painter.setPen(theme.textSecondary);
+            painter.drawText(QRectF(titleLeft, inspRect.top() + 36.0, titleAvailW, 18.0),
                              Qt::AlignLeft | Qt::AlignVCenter,
                              humanReadableFileType(extLower));
 
             // Header divider
-            const qreal hdrBottom = inspRect.top() + 62.0;
+            const qreal hdrBottom = inspRect.top() + 68.0;
             painter.setPen(QPen(theme.borderSubtle, 1.0));
             painter.drawLine(QPointF(contentLeft, hdrBottom), QPointF(inspRect.right() - pad, hdrBottom));
 
-            // B. Windows Full Path Card + Working Copy Button
-            painter.setFont(ThemeTokens::makeMonoFont(10, QFont::Normal));
-            painter.setPen(theme.textSecondary);
-            painter.drawText(QRectF(contentLeft, hdrBottom + 6.0, contentWidth, 14.0),
+            // B. Path: (Simple label "Path:" + clean light-pink box + Copy button written in black)
+            painter.setFont(ThemeTokens::makeFont(11, QFont::DemiBold));
+            painter.setPen(theme.textPrimary);
+            painter.drawText(QRectF(contentLeft, hdrBottom + 8.0, contentWidth, 16.0),
                              Qt::AlignLeft | Qt::AlignVCenter,
-                             QStringLiteral("WINDOWS FULL PATH:"));
+                             QStringLiteral("Path:"));
 
-            const QRectF pathBoxRect(contentLeft, hdrBottom + 22.0, contentWidth, 26.0);
+            const QRectF pathBoxRect(contentLeft, hdrBottom + 26.0, contentWidth, 30.0);
             painter.setPen(QPen(theme.borderColor, 1.0));
             painter.setBrush(theme.codeBoxBackground);
-            painter.drawRoundedRect(pathBoxRect, 6.0, 6.0);
+            painter.drawRoundedRect(pathBoxRect, 8.0, 8.0);
 
             const QRectF copyBtnRect = inspectorCopyPathButtonRect(inspRect);
-            painter.setPen(Qt::NoPen);
-            painter.setBrush(theme.brandPinkTint);
-            painter.drawRoundedRect(copyBtnRect, 4.0, 4.0);
-            painter.setFont(ThemeTokens::makeMonoFont(9, QFont::DemiBold));
-            painter.setPen(theme.brandPinkLight);
-            painter.drawText(copyBtnRect, Qt::AlignCenter, QStringLiteral("CPY"));
+            painter.setPen(QPen(theme.brandPink, 1.0));
+            painter.setBrush(theme.brandPinkStrongFill);
+            painter.drawRoundedRect(copyBtnRect, 5.0, 5.0);
+            painter.setFont(ThemeTokens::makeFont(10, QFont::DemiBold));
+            painter.setPen(theme.textPrimary);
+            painter.drawText(copyBtnRect, Qt::AlignCenter, QStringLiteral("Copy"));
 
             const QFont pathFont = ThemeTokens::makeMonoFont(10, QFont::Normal);
             painter.setFont(pathFont);
             painter.setPen(theme.textPrimary);
             const QFontMetrics fmPath(pathFont);
-            const int pathMaxW = std::max(60, static_cast<int>(pathBoxRect.width() - 44.0));
+            const int pathMaxW = std::max(60, static_cast<int>(pathBoxRect.width() - 56.0));
             const QString nativePath = QDir::toNativeSeparators(sel->path);
-            painter.drawText(QRectF(pathBoxRect.left() + 8.0, pathBoxRect.top(), pathMaxW, pathBoxRect.height()),
+            painter.drawText(QRectF(pathBoxRect.left() + 10.0, pathBoxRect.top(), pathMaxW, pathBoxRect.height()),
                              Qt::AlignLeft | Qt::AlignVCenter,
                              fmPath.elidedText(nativePath, Qt::ElideMiddle, pathMaxW));
 
-            // C. 2x2 Real Metadata Grid (File Size, Last Modified, Match Mode, Location / Page)
-            const qreal gridTop = pathBoxRect.bottom() + 8.0;
-            const qreal cellW = (contentWidth - 8.0) * 0.5;
-            const qreal cellH = 38.0;
+            // C. Clean 2-Card Metadata Row (Size & Modified ONLY — NO Match Source, NO Cosine Similarity!)
+            const qreal gridTop = pathBoxRect.bottom() + 10.0;
+            const qreal cellW = (contentWidth - 10.0) * 0.5;
+            const qreal cellH = 42.0;
 
-            auto drawMetaCard = [&](const QRectF& cell, const QString& label, const QString& value, bool accentVal) {
+            auto drawMetaCard = [&](const QRectF& cell, const QString& label, const QString& value) {
                 painter.setPen(QPen(theme.borderSubtle, 1.0));
                 painter.setBrush(theme.codeBoxBackground);
-                painter.drawRoundedRect(cell, 6.0, 6.0);
+                painter.drawRoundedRect(cell, 8.0, 8.0);
 
-                painter.setFont(ThemeTokens::makeMonoFont(9, QFont::Normal));
+                painter.setFont(ThemeTokens::makeFont(10, QFont::Normal));
                 painter.setPen(theme.textMuted);
-                painter.drawText(QRectF(cell.left() + 8.0, cell.top() + 4.0, cell.width() - 16.0, 13.0),
+                painter.drawText(QRectF(cell.left() + 10.0, cell.top() + 4.0, cell.width() - 20.0, 14.0),
                                  Qt::AlignLeft | Qt::AlignVCenter,
                                  label);
 
-                const QFont valFont = ThemeTokens::makeMonoFont(10, QFont::Medium);
+                const QFont valFont = ThemeTokens::makeFont(11, QFont::DemiBold);
                 painter.setFont(valFont);
-                painter.setPen(accentVal ? theme.brandPinkLight : theme.textPrimary);
+                painter.setPen(theme.textPrimary);
                 const QFontMetrics fmVal(valFont);
-                painter.drawText(QRectF(cell.left() + 8.0, cell.top() + 18.0, cell.width() - 16.0, 15.0),
+                painter.drawText(QRectF(cell.left() + 10.0, cell.top() + 20.0, cell.width() - 20.0, 17.0),
                                  Qt::AlignLeft | Qt::AlignVCenter,
-                                 fmVal.elidedText(value, Qt::ElideMiddle, static_cast<int>(cell.width() - 16.0)));
+                                 fmVal.elidedText(value, Qt::ElideMiddle, static_cast<int>(cell.width() - 20.0)));
             };
 
             drawMetaCard(QRectF(contentLeft, gridTop, cellW, cellH),
-                         QStringLiteral("File Size:"),
-                         formatHumanSize(sel->size),
-                         false);
+                         QStringLiteral("Size"),
+                         formatHumanSize(sel->size));
 
-            drawMetaCard(QRectF(contentLeft + cellW + 8.0, gridTop, cellW, cellH),
-                         QStringLiteral("Last Modified:"),
-                         formatTimestamp(sel->mtime),
-                         false);
+            drawMetaCard(QRectF(contentLeft + cellW + 10.0, gridTop, cellW, cellH),
+                         QStringLiteral("Modified"),
+                         formatTimestamp(sel->mtime));
 
-            drawMetaCard(QRectF(contentLeft, gridTop + cellH + 6.0, cellW, cellH),
-                         QStringLiteral("Match Source:"),
-                         matchSourceDescription(*sel),
-                         true);
-
-            QString fourthLabel = QStringLiteral("Location:");
-            QString fourthValue = QDir::toNativeSeparators(sel->parentDirectory);
-            if (sel->semanticSimilarity > 0.0f) {
-                fourthLabel = QStringLiteral("Cosine Similarity:");
-                fourthValue = QStringLiteral("%1 (384-D)").arg(sel->semanticSimilarity, 0, 'f', 3);
-            } else if (sel->matchedPage > 0) {
-                fourthLabel = QStringLiteral("Document Page:");
-                fourthValue = QStringLiteral("Page %1").arg(sel->matchedPage);
-            }
-            drawMetaCard(QRectF(contentLeft + cellW + 8.0, gridTop + cellH + 6.0, cellW, cellH),
-                         fourthLabel,
-                         fourthValue,
-                         sel->semanticSimilarity > 0.0f);
-
-            // D. Content / Source Code Inspector Box
-            const qreal snipHeaderTop = gridTop + cellH * 2.0 + 14.0;
-            painter.setFont(ThemeTokens::makeMonoFont(10, QFont::DemiBold));
-            painter.setPen(theme.brandPinkLight);
-            painter.drawText(QRectF(contentLeft, snipHeaderTop, contentWidth * 0.65, 16.0),
+            // D. Single Clean "Summary:" Box (NO Inspector label, NO repeated filename/ext bar!)
+            const qreal summaryHeaderTop = gridTop + cellH + 14.0;
+            painter.setFont(ThemeTokens::makeFont(11, QFont::DemiBold));
+            painter.setPen(theme.textPrimary);
+            painter.drawText(QRectF(contentLeft, summaryHeaderTop, contentWidth * 0.65, 16.0),
                              Qt::AlignLeft | Qt::AlignVCenter,
-                             QStringLiteral("IN-FILE CONTENT INSPECTOR:"));
+                             QStringLiteral("Summary:"));
 
             if (sel->matchedPage > 0) {
-                painter.setFont(ThemeTokens::makeMonoFont(10, QFont::Normal));
+                painter.setFont(ThemeTokens::makeFont(10, QFont::Medium));
                 painter.setPen(theme.textSecondary);
-                painter.drawText(QRectF(contentLeft, snipHeaderTop, contentWidth, 16.0),
+                painter.drawText(QRectF(contentLeft, summaryHeaderTop, contentWidth, 16.0),
                                  Qt::AlignRight | Qt::AlignVCenter,
                                  QStringLiteral("Page %1").arg(sel->matchedPage));
             }
 
-            const qreal actionBarTop = inspRect.bottom() - 44.0;
-            const qreal codeBoxTop = snipHeaderTop + 18.0;
-            const qreal codeBoxH = std::max(64.0, actionBarTop - codeBoxTop - 6.0);
-            const QRectF codeBoxRect(contentLeft, codeBoxTop, contentWidth, codeBoxH);
+            const qreal actionBarTop = inspRect.bottom() - 48.0;
+            const qreal summaryBoxTop = summaryHeaderTop + 20.0;
+            const qreal summaryBoxH = std::max(84.0, actionBarTop - summaryBoxTop - 10.0);
+            const QRectF summaryBoxRect(contentLeft, summaryBoxTop, contentWidth, summaryBoxH);
 
             painter.setPen(QPen(theme.borderColor, 1.0));
             painter.setBrush(theme.codeBoxBackground);
-            painter.drawRoundedRect(codeBoxRect, 8.0, 8.0);
+            painter.drawRoundedRect(summaryBoxRect, 8.0, 8.0);
 
-            // Top sub-bar inside content box (filename + extension badge)
-            const QRectF codeSubHeader(codeBoxRect.left(), codeBoxRect.top(), codeBoxRect.width(), 22.0);
-            painter.setPen(QPen(theme.borderSubtle, 1.0));
-            painter.drawLine(QPointF(codeSubHeader.left(), codeSubHeader.bottom()),
-                             QPointF(codeSubHeader.right(), codeSubHeader.bottom()));
-
-            painter.setFont(ThemeTokens::makeMonoFont(10, QFont::Medium));
-            painter.setPen(theme.brandPinkLight);
-            const QFontMetrics fmSub(painter.font());
-            painter.drawText(QRectF(codeSubHeader.left() + 10.0, codeSubHeader.top(), codeSubHeader.width() - 70.0, 22.0),
-                             Qt::AlignLeft | Qt::AlignVCenter,
-                             fmSub.elidedText(sel->name, Qt::ElideMiddle, static_cast<int>(codeSubHeader.width() - 75.0)));
-
-            painter.setPen(theme.textMuted);
-            painter.drawText(QRectF(codeSubHeader.left(), codeSubHeader.top(), codeSubHeader.width() - 10.0, 22.0),
-                             Qt::AlignRight | Qt::AlignVCenter,
-                             extLower.isEmpty() ? QStringLiteral("FILE") : extLower.toUpper());
-
-            // Body passage inside content box
-            const QRectF passageRect = codeBoxRect.adjusted(10.0, 26.0, -10.0, -6.0);
+            // Body passage directly inside Summary card (clean black text, no duplicate title header!)
+            const QRectF passageRect = summaryBoxRect.adjusted(12.0, 10.0, -12.0, -10.0);
             QString bodyText = !m_previewText.isEmpty() ? m_previewText : sel->snippet;
             if (bodyText.isEmpty()) {
-                bodyText = QStringLiteral("Preview unavailable for this file type.");
+                bodyText = QStringLiteral("No text summary available for this file.");
             }
             bodyText.replace(QChar(0x00AB), QString());
             bodyText.replace(QChar(0x00BB), QString());
 
             const bool isCode = isSourceCodeExtension(extLower);
             painter.setFont(isCode ? ThemeTokens::makeMonoFont(11, QFont::Normal)
-                                   : ThemeTokens::makeFont(11, QFont::Normal));
+                                   : ThemeTokens::makeFont(12, QFont::Normal));
             painter.setPen(theme.textPrimary);
             painter.drawText(passageRect,
                              Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
                              bodyText.trimmed());
 
-            // E. Bottom Action Toolbar inside Inspector (Open, Reveal, Related, Pin)
+            // E. Clean Light-Pink Action Buttons Written in Black
             painter.setPen(QPen(theme.borderSubtle, 1.0));
             painter.drawLine(QPointF(inspRect.left(), actionBarTop), QPointF(inspRect.right(), actionBarTop));
 
@@ -1263,49 +1149,41 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
             const QRectF relatedBtn = inspectorRelatedButtonRect(inspRect);
             const QRectF pinBtn = inspectorPinButtonRect(inspRect);
 
-            // Primary pink Open button
-            painter.setPen(Qt::NoPen);
-            painter.setBrush(theme.brandPink);
-            painter.drawRoundedRect(openBtn, 7.0, 7.0);
-            painter.setFont(ThemeTokens::makeFont(11, QFont::DemiBold));
-            painter.setPen(QColor(255, 255, 255));
-            painter.drawText(openBtn, Qt::AlignCenter, QStringLiteral("Open ↵"));
-
-            // Secondary action buttons
-            auto drawSecondaryBtn = [&](const QRectF& r, const QString& label, bool activeTint = false) {
-                painter.setPen(QPen(activeTint ? theme.brandPinkBorder : theme.borderColor, 1.0));
-                painter.setBrush(activeTint ? theme.brandPinkTint : theme.elevatedBackground);
+            auto drawActionBtn = [&](const QRectF& r, const QString& label, bool primaryStyle) {
+                painter.setPen(QPen(primaryStyle ? theme.brandPink : theme.borderColor, 1.1));
+                painter.setBrush(primaryStyle ? theme.brandPinkStrongFill : theme.brandPinkTint);
                 painter.drawRoundedRect(r, 7.0, 7.0);
-                painter.setFont(ThemeTokens::makeFont(11, QFont::Medium));
-                painter.setPen(activeTint ? theme.brandPinkLight : theme.textPrimary);
+                painter.setFont(ThemeTokens::makeFont(11, primaryStyle ? QFont::Bold : QFont::Medium));
+                painter.setPen(theme.textPrimary);
                 painter.drawText(r, Qt::AlignCenter, label);
             };
 
-            drawSecondaryBtn(revealBtn, QStringLiteral("Reveal ^↵"));
-            drawSecondaryBtn(relatedBtn, QStringLiteral("Related ^R"));
-            drawSecondaryBtn(pinBtn, sel->isPinned ? QStringLiteral("Pinned ★") : QStringLiteral("Pin ^D"), sel->isPinned);
+            drawActionBtn(openBtn, QStringLiteral("Open"), true);
+            drawActionBtn(revealBtn, QStringLiteral("Reveal"), false);
+            drawActionBtn(relatedBtn, QStringLiteral("Related"), false);
+            drawActionBtn(pinBtn, sel->isPinned ? QStringLiteral("Pinned") : QStringLiteral("Pin"), sel->isPinned);
         }
     }
 
     // -------------------------------------------------------------------------
-    // 4. Bottom Keyboard Navigation & Offline Privacy Bar
+    // 4. Clean Bottom Footer (NO ESC Collapse clutter!)
     // -------------------------------------------------------------------------
     painter.setPen(QPen(theme.borderSubtle, 1.0));
     painter.drawLine(QPointF(bounds.left(), footerTop), QPointF(bounds.right(), footerTop));
 
     const QRectF footerRect(bounds.left() + 16.0, footerTop, bounds.width() - 32.0, kFooterHeight);
-    painter.setFont(ThemeTokens::makeMonoFont(11, QFont::Normal));
+    painter.setFont(ThemeTokens::makeFont(11, QFont::Normal));
     painter.setPen(theme.textSecondary);
     painter.drawText(footerRect,
                      Qt::AlignLeft | Qt::AlignVCenter,
-                     QStringLiteral("↑↓ Navigate   ↵ Open   ^↵ Reveal   ^C Copy Path   Tab Mode   ESC Collapse"));
+                     QStringLiteral("↑↓ Navigate   ·   Enter Open   ·   Ctrl+Enter Reveal   ·   Tab Switch Mode"));
 
-    painter.setFont(ThemeTokens::makeMonoFont(11, QFont::DemiBold));
-    painter.setPen(theme.brandPinkLight);
+    painter.setFont(ThemeTokens::makeFont(11, QFont::DemiBold));
+    painter.setPen(theme.textPrimary);
     painter.drawText(footerRect,
                      Qt::AlignRight | Qt::AlignVCenter,
-                     m_indexingInProgress ? QStringLiteral("● Indexing in Background")
-                                          : QStringLiteral("● 100% Offline"));
+                     m_indexingInProgress ? QStringLiteral("Indexing in Background")
+                                          : QStringLiteral("UshaLabs · Offline"));
 }
 
 } // namespace lumen::ui

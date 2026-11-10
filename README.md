@@ -30,42 +30,44 @@ Built to follow the visual identity and design language of **UshaLabs Downshift*
 > *Lumen remains nearly invisible to the operating system when idle while staying instantly accessible on the desktop.*
 
 - **100% Offline & Private:** No cloud APIs, no accounts, no telemetry, and zero network traffic. Everything is indexed, stored, and queried locally on your machine.
-- **Persistent Desktop Bar:** Positioned neatly at the upper-right corner of your desktop (`460 × 52` px) with zero desktop disruption, plus an instant global shortcut (`Ctrl+Alt+Space`) from any application.
+- **Always-Running System Tray & Embedded Desktop Icon:** Stays out of the Windows taskbar and runs continuously in the background from the system tray, with a movable `56 × 56` desktop launcher icon docked on the right by default. Clicking the icon smoothly slides out the search bar (`460 × 56` px) toward the center of the screen without popping open results until you type.
 - **Instant Search Across 100k+ Files:** Sub-5ms query response times via dual-tier B-tree prefix indexing and SQLite FTS5 trigram matching.
 - **Zero-Dependency Document Parser:** Built-in native text extractors for `.pdf` (with page tracking), `.docx`, `.md`, and `.txt` utilizing pure C++ RFC 1950/1951 Deflate decompression.
 - **On-Demand Neural Semantic Search:** Bundled INT8-quantized `all-MiniLM-L6-v2` transformer model (384-D) running locally on CPU via ONNX Runtime. Dynamically loaded on demand and automatically unloaded during idle periods to reclaim memory.
-- **Near-Zero Resource Footprint:** Idles at **~0.01% CPU** and **~27–30 MB Working Set RAM** (`~5.5 MB` private bytes), waking in under **35 ms**.
+- **Near-Zero Resource Footprint:** Idles at **~0.01% CPU** and **~27–30 MB Working Set RAM** (`~5.5 MB` private bytes), waking in under **45 ms**.
 
 ---
 
 ## Features & Visual Walkthrough
 
-### 1. Persistent Desktop Search Bar
+### 1. Docked Desktop Icon & Slide-Out Search Bar
 
-The search bar is Lumen's primary entry point. Designed as a calm, native Windows surface (`460 × 52` px) docked to the upper-right corner of your desktop, it rests permanently on the Windows wallpaper without occluding open windows or interrupting your active workspace.
+Lumen sits quietly on the Windows desktop as a compact `56 × 56` pure white & pink launcher icon (`HWND_BOTTOM`, hidden from the taskbar) that you can drag anywhere on screen. Clicking the icon—or pressing `Ctrl+Alt+Space`—smoothly slides the search bar out to the left when docked on the right (or to the right when docked on the left), keeping the UI completely uncluttered until you start typing.
 
 <div align="center">
-  <img src="docs/screenshots/desktop_search_bar.png" alt="Lumen Desktop Search Bar — Idle State" width="460" />
+  <img src="docs/screenshots/desktop_icon.png" alt="Lumen Docked Desktop Icon" width="64" />
+  <br /><br />
+  <img src="docs/screenshots/desktop_search_bar.png" alt="Lumen Slide-Out Search Bar" width="460" />
 </div>
 
-- **Unobtrusive Desktop Docking:** Anchored using Win32 `HWND_BOTTOM` integration so it stays comfortably behind active windows.
-- **`Win+D` (Show Desktop) Resilient:** Listens to shell minimize events through a low-overhead WinEvent hook, remaining visible and accessible when you switch to your desktop.
-- **Global Hotkey Summoning:** Press `Ctrl+Alt+Space` from inside any game, browser, or full-screen app to instantly summon Lumen into focus.
-- **Downshift Visual Identity:** Restrained `#EC1680` pink focus indicator, 12px rounded geometry, minimal vector search icon, and Segoe UI Variable typography.
+- **Zero Taskbar Footprint:** Runs continuously via System Tray and `WS_EX_TOOLWINDOW` desktop integration without ever creating a taskbar button.
+- **Adaptive Slide Direction:** Automatically slides leftward from right-side placements and rightward from left-side placements.
+- **Nothing Shown Until You Search:** Clicking into an empty bar focuses input cleanly with zero empty dropdown clutter.
+- **Pure White & Pink Design:** Clean `#FFFFFF` surfaces, soft light-pink highlights written in crisp black typography, and Lumen's `#EC1680` brand icon.
 
 ---
 
 ### 2. Instant Filename Discovery
 
-Type any keyword, prefix, acronym, or substring to locate files instantly across your entire library. Lumen expands into a spacious `620 px` results panel aligned cleanly with the desktop search bar.
+As soon as you type a query, Lumen expands into an `860 px` dual-column workspace featuring matching files on the left and clean file details (`Path:`, `Size`, `Modified`, `Summary:`, and quick actions) on the right.
 
 <div align="center">
-  <img src="docs/screenshots/filename_search.png" alt="Lumen Filename Search Results" width="620" />
+  <img src="docs/screenshots/filename_search.png" alt="Lumen Filename Search Results" width="760" />
 </div>
 
+- **Focused, Human-First Layout:** Clean filename highlighting, path box with one-click `Copy`, file size, modified date, and direct `Summary:` passage preview.
 - **Sub-5ms Query Latency:** Backed by SQLite 3.47 WAL mode with dual B-tree exact prefix indexing and FTS5 trigram substring matching.
-- **Calm, Scannable Hierarchy:** Refined monochrome/subtle vector file-type icons, clean breadcrumb folder paths (`Documents / Finance`), and contextual file size and date metadata shown on selection or hover.
-- **Real-Time Filesystem Synchronization:** Monitors folder changes asynchronously via `ReadDirectoryChangesW` non-blocking completion routines, reconciling additions, renames, and deletions in sub-millisecond time.
+- **Real-Time Filesystem Synchronization:** Monitors folder changes asynchronously via `ReadDirectoryChangesW` non-blocking completion routines, reconciling additions, renames, and deletions automatically.
 
 ---
 
@@ -74,13 +76,13 @@ Type any keyword, prefix, acronym, or substring to locate files instantly across
 Find files by what is written *inside* them—even if you do not remember their filename or folder location.
 
 <div align="center">
-  <img src="docs/screenshots/document_content_search.png" alt="Lumen Document Content Search" width="620" />
+  <img src="docs/screenshots/document_content_search.png" alt="Lumen Document Content Search" width="760" />
 </div>
 
 - **Native Multi-Format Support:** Extracts text directly from Adobe PDF (`.pdf`), Microsoft Word (`.docx`), Markdown (`.md`), plain text (`.txt`, `.log`), and source code files.
 - **Zero Heavy Dependencies:** Implements a standalone RFC 1950/1951 Deflate decompression codec with a strict 16 MB decompression limit for total protection against zip-bombs and malformed streams.
-- **Precise PDF Page Resolution:** Automatically tracks byte offsets and page markers (`/FlateDecode` + `BT...ET`), displaying subtle page numbers (`Page 2`) directly on matching rows.
-- **BM25 Highlighted Snippets:** Displays a single readable passage line beneath the folder path with matching terms highlighted in Downshift pink.
+- **Precise PDF Page Resolution:** Automatically tracks byte offsets and page markers (`/FlateDecode` + `BT...ET`), displaying subtle page numbers (`Page 2`) where relevant.
+- **Highlighted Snippets:** Shows matching context excerpts highlighted cleanly in light pink with bold black text.
 
 ---
 
@@ -89,50 +91,42 @@ Find files by what is written *inside* them—even if you do not remember their 
 Search your personal knowledge base using natural language descriptions, high-level concepts, or vague recollections—with **zero keyword overlap**.
 
 <div align="center">
-  <img src="docs/screenshots/semantic_search.png" alt="Lumen Offline Semantic Search" width="620" />
+  <img src="docs/screenshots/semantic_search.png" alt="Lumen Offline Semantic Search" width="760" />
 </div>
 
 - **Local Transformer Model:** Bundles a quantized INT8 `all-MiniLM-L6-v2` embedding model (384-dimensional dense vectors) executed entirely on your CPU via ONNX Runtime.
 - **Native WordPiece Tokenizer:** Standalone C++ tokenizer utilizing standard BERT vocabulary (`vocab.txt`) with greedy longest-match segmentation.
 - **Sliding-Window Document Chunker:** Splits documents into 350-word chunks with 50-word overlaps to preserve semantic continuity across lengthy reports and research papers.
-- **Adaptive Memory Management:** ONNX Runtime is dynamically loaded via `LoadLibraryW` only when semantic operations are initiated. After indexing or query inactivity, the inference engine is unloaded, and heap memory is returned to the OS via `_heapmin` and `SetProcessWorkingSetSizeEx`.
+- **Adaptive Memory Management:** ONNX Runtime is dynamically loaded via `LoadLibraryW` only when semantic operations are initiated. After indexing or query inactivity, the inference engine is unloaded, and heap memory is returned to the OS.
 
 ---
 
-### 5. Search Modes, Quick Preview & Dark Theme
+### 5. Search Modes & Summary Actions
 
-Navigate your files with clean text-tab filters, keyboard-first shortcuts, contextual document previews, and full Light/Dark theme support.
-
-<div align="center">
-  <img src="docs/screenshots/quick_preview_and_modes.png" alt="Lumen Quick Preview & Search Modes" width="620" />
-</div>
-
-<br />
+Navigate between `All`, `Files`, `Content`, and `Semantic` scopes via click or `Tab`, inspect document summaries, and act directly from the keyboard or right-hand action bar (`Open`, `Reveal`, `Related`, `Pin`).
 
 <div align="center">
-  <img src="docs/screenshots/dark_theme_search.png" alt="Lumen Dark Theme Search" width="620" />
+  <img src="docs/screenshots/quick_preview_and_modes.png" alt="Lumen Summary & Search Modes" width="760" />
 </div>
 
 - **Clean Mode Navigation:** Switch between `All`, `Files`, `Content`, and `Semantic` modes via mouse click or `Tab` / `Shift+Tab`.
 - **Inline Filter Syntax:** Narrow your search directly in the query field (`ext:pdf`, `type:doc`, `in:Finance`, `size:>1mb`, `modified:7d`).
-- **Contextual Quick Preview (`Ctrl+P`):** Toggle the preview pane to inspect full filenames, breadcrumb paths, page numbers, extracted document passages, and one-click `Open` and `Reveal in Explorer` actions.
-- **Light, Dark & System Themes:** Automatically follows Windows 11 color scheme preferences or locks to Light or Dark mode.
+- **Keyboard-First Actions:** `Enter` opens, `Ctrl+Enter` reveals in File Explorer, `Ctrl+R` finds related documents, `Ctrl+D` pins favorites, and `Ctrl+Shift+C` copies paths.
 
 ---
 
 ### 6. Configuration & Customization
 
-Fine-tune Lumen's indexing locations, appearance, and system behavior through a clean, modern settings window organized into `General`, `Appearance`, `Search & Indexing`, and `Storage & Privacy`.
+Fine-tune Lumen's indexing locations, shortcuts, and startup behavior through a clean pure-white and light-pink settings dialog (also kept out of the taskbar).
 
 <div align="center">
-  <img src="docs/screenshots/settings_dialog.png" alt="Lumen Native Settings Dialog" width="440" />
+  <img src="docs/screenshots/settings_dialog.png" alt="Lumen Native Settings Dialog" width="420" />
 </div>
 
-- **Indexed Folders Management:** Add custom storage drives or folders with recursive directory scanning.
-- **Exclusion Filters:** Define custom folder or pattern exclusions (e.g. `.git`, `node_modules`, `build`, `target`).
-- **Display Modes:** Switch between docked **Desktop Mode** and **Always-on-Top Floating Mode**.
-- **Autostart Control:** Configure automatic startup with Windows.
-- **Index Health & Maintenance:** Trigger on-demand re-indexing, perform SQLite database vacuuming, and view real-time index size metrics.
+- **Indexed Folders Management:** Add custom drives or folders with recursive directory scanning.
+- **Desktop Icon Placement:** Drag the icon anywhere on your desktop or reset back to the default right-edge position.
+- **Always-On-Top Option:** Choose whether the desktop launcher icon rests embedded on the desktop or stays above active windows.
+- **Autostart Control:** Configure automatic startup with Windows in the system tray.
 
 ---
 
@@ -143,10 +137,9 @@ Lumen is engineered with a modular, reactive architecture that separates Windows
 ```mermaid
 flowchart TD
     subgraph UI["Native UI Layer (Qt 6 Widgets + Win32)"]
-        Bar["DesktopSearchBar\n(Docked 460×52 px Desktop Pill)"]
-        Popup["SearchPopupWidget\n(Mode Filter Pills + Virtualized List)"]
-        Preview["QuickPreviewWidget\n(Metadata + Content + Page View)"]
-        Settings["SettingsDialog\n(Folder Scopes + Exclusion Rules)"]
+        Bar["DesktopSearchBar\n(56×56 Docked Icon -> 460×56 Slide-Out Pill)"]
+        Popup["SearchPopupWidget\n(Dual-Pane Pure White & Light Pink Workspace)"]
+        Settings["SettingsDialog\n(Folder Scopes & Desktop Icon Settings)"]
     end
 
     subgraph Platform["Windows Platform Layer"]
@@ -169,7 +162,6 @@ flowchart TD
 
     WinInt --> Bar
     Bar --> Popup
-    Popup --> Preview
     Settings --> Config
     Watcher --> Indexer
     Indexer --> Extractor

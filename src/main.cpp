@@ -86,12 +86,15 @@ int main(int argc, char* argv[]) {
                 dir.mkpath(QStringLiteral("."));
             }
             if (auto* bar = lumenApp.desktopSearchBar()) {
-                const QString origTheme = lumen::core::SettingsManager::instance().appearancePreference();
-                lumen::core::SettingsManager::instance().setAppearancePreference(QStringLiteral("dark"), false);
                 bar->refreshAppearanceFromSettings();
 
                 bar->show();
                 bar->collapsePopupAndDeactivate(true);
+                QCoreApplication::processEvents();
+                bar->grab().save(dir.filePath(QStringLiteral("desktop_icon.png")));
+
+                // Capture open search bar (slid out, nothing underneath when empty)
+                bar->activateAndFocusSearch(false);
                 QCoreApplication::processEvents();
                 const QPixmap idleGrab = bar->grab();
                 idleGrab.save(dir.filePath(QStringLiteral("desktop_search_bar.png")));
@@ -158,7 +161,7 @@ int main(int argc, char* argv[]) {
                 bar->activateAndFocusSearch();
                 bar->setSearchText(QStringLiteral("report"));
 
-                QTimer::singleShot(180, &qApp[0], [bar, dir, origTheme]() {
+                QTimer::singleShot(180, &qApp[0], [bar, dir]() {
                     QCoreApplication::processEvents();
                     const QPixmap fileGrab = bar->grab();
                     fileGrab.save(dir.filePath(QStringLiteral("filename_search.png")));
@@ -180,25 +183,24 @@ int main(int argc, char* argv[]) {
                     }
 
                     bar->setSearchText(QStringLiteral("enterprise licensing"));
-                    QTimer::singleShot(180, &qApp[0], [bar, dir, origTheme]() {
+                    QTimer::singleShot(180, &qApp[0], [bar, dir]() {
                         QCoreApplication::processEvents();
                         const QPixmap contentGrab = bar->grab();
                         contentGrab.save(dir.filePath(QStringLiteral("document_content_search.png")));
                         contentGrab.save(dir.filePath(QStringLiteral("phase2_content_search_results.png")));
 
                         bar->setSearchText(QStringLiteral("company financial earnings growth"));
-                        QTimer::singleShot(250, &qApp[0], [bar, dir, origTheme]() {
+                        QTimer::singleShot(250, &qApp[0], [bar, dir]() {
                             QCoreApplication::processEvents();
                             const QPixmap semGrab = bar->grab();
                             semGrab.save(dir.filePath(QStringLiteral("semantic_search.png")));
                             semGrab.save(dir.filePath(QStringLiteral("phase3_semantic_search_results.png")));
-                            semGrab.save(dir.filePath(QStringLiteral("dark_theme_search.png")));
 
                             if (bar->popupWidget()) {
                                 bar->popupWidget()->setSearchMode(lumen::search::SearchMode::Semantic);
                                 bar->popupWidget()->setPreviewVisible(true);
                             }
-                            QTimer::singleShot(180, &qApp[0], [bar, dir, origTheme]() {
+                            QTimer::singleShot(180, &qApp[0], [bar, dir]() {
                                 QCoreApplication::processEvents();
                                 const QPixmap prevGrab = bar->grab();
                                 prevGrab.save(dir.filePath(QStringLiteral("quick_preview_and_modes.png")));
@@ -214,7 +216,6 @@ int main(int argc, char* argv[]) {
                                 settingsGrab.save(dir.filePath(QStringLiteral("phase0_settings_dialog.png")));
                                 settingsDlg.hide();
 
-                                lumen::core::SettingsManager::instance().setAppearancePreference(origTheme, false);
                                 lumen::semantic::SemanticEmbeddingEngine::instance().unloadModel();
                                 lumen::database::DatabaseManager::instance().clearAllFiles();
                                 QCoreApplication::quit();

@@ -61,17 +61,17 @@ private slots:
 
         const QPoint customPos(260, 140);
         settings.setDesktopBarPosition(customPos, true);
-        settings.setAppearancePreference(QStringLiteral("dark"), true);
+        settings.setAppearancePreference(QStringLiteral("light"), true);
 
         // Reload from disk to verify persistence
         QVERIFY(settings.load());
         QVERIFY(settings.hasCustomPosition());
         QCOMPARE(settings.desktopBarPosition(), customPos);
-        QCOMPARE(settings.appearancePreference(), QStringLiteral("dark"));
+        QCOMPARE(settings.appearancePreference(), QStringLiteral("light"));
 
-        // Reset back to dark default for subsequent UI tests
+        // Reset back to default for subsequent UI tests
         settings.resetDesktopBarPosition(false);
-        settings.setAppearancePreference(QStringLiteral("dark"), true);
+        settings.setAppearancePreference(QStringLiteral("light"), true);
     }
 
     void testSingleInstanceEnforcement() {
@@ -134,12 +134,28 @@ private slots:
         bar.show();
         QVERIFY(QTest::qWaitForWindowExposed(&bar));
         QVERIFY(bar.isVisible());
+        // Starts docked as a compact 56x56 desktop icon on the right side
+        QCOMPARE(bar.width(), lumen::ui::DesktopSearchBar::kIconSize);
+        QCOMPARE(bar.height(), lumen::ui::DesktopSearchBar::kIconSize);
+        QVERIFY(!bar.isBarExpanded());
+        QVERIFY(!bar.isPopupExpanded());
+        QVERIFY(bar.slidesLeft());
+
+        // Opening the empty bar slides it out cleanly with NO results popup shown underneath
+        bar.activateAndFocusSearch(false);
+        QCoreApplication::processEvents();
+        QVERIFY(bar.isBarExpanded());
         QCOMPARE(bar.width(), lumen::ui::DesktopSearchBar::kBarWidth);
         QCOMPARE(bar.height(), lumen::ui::DesktopSearchBar::kBarHeight);
         QVERIFY(!bar.isPopupExpanded());
+        QVERIFY(!bar.popupWidget()->isVisible());
 
-        // Activate and type text -> popup must open with Phase 0 status message
-        bar.activateAndFocusSearch();
+        // Clicking inside an empty search bar must still show nothing underneath
+        QTest::mouseClick(bar.lineEdit(), Qt::LeftButton);
+        QCoreApplication::processEvents();
+        QVERIFY(!bar.isPopupExpanded());
+
+        // Only typing an explicit query opens the results workspace
         QTest::keyClicks(bar.lineEdit(), QStringLiteral("quarterly report"));
         QCoreApplication::processEvents();
 
@@ -150,11 +166,17 @@ private slots:
         QCOMPARE(bar.popupWidget()->statusHeadline(),
                  QStringLiteral("Your search index is not ready yet."));
 
-        // Pressing Escape must collapse the popup cleanly
+        // Pressing Escape collapses back to the docked desktop icon cleanly
         QTest::keyClick(bar.lineEdit(), Qt::Key_Escape);
         QCoreApplication::processEvents();
         QVERIFY(!bar.isPopupExpanded());
-        QCOMPARE(bar.height(), lumen::ui::DesktopSearchBar::kBarHeight);
+        QVERIFY(!bar.isBarExpanded());
+        QCOMPARE(bar.width(), lumen::ui::DesktopSearchBar::kIconSize);
+        QCOMPARE(bar.height(), lumen::ui::DesktopSearchBar::kIconSize);
+
+        // Verify left-side placement slides right instead of left
+        const QPoint leftPos = lumen::ui::DesktopSearchBar::clampPositionToScreens(QPoint(24, 140));
+        QVERIFY(!lumen::ui::DesktopSearchBar::shouldSlideLeftFromAnchor(leftPos));
     }
 
     void testPositionPersistenceAcrossInstances() {

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <QCheckBox>
-#include <QComboBox>
 #include <QDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -21,23 +20,24 @@ signals:
     void resetPositionRequested();
     void rebuildIndexRequested();
 
+protected:
+    void showEvent(QShowEvent* event) override;
+
 private slots:
     void onSaveClicked();
     void onResetPositionClicked();
     void onAddFolderClicked();
     void onRemoveFolderClicked();
     void onRebuildIndexClicked();
-    void onAppearanceChanged();
 
 private:
     void loadFromSettings();
     void refreshDbStatusLabel();
-    void applyThemeStyles(bool dark);
+    void applyThemeStyles();
 
     QCheckBox* m_desktopBarVisibleCheck = nullptr;
     QCheckBox* m_alwaysOnTopCheck = nullptr;
     QCheckBox* m_startWithWindowsCheck = nullptr;
-    QComboBox* m_appearanceCombo = nullptr;
     QLineEdit* m_shortcutEdit = nullptr;
 
     QCheckBox* m_enableContentCheck = nullptr;
