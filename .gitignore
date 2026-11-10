@@ -7,9 +7,10 @@ cmake-build-*/
 
 # Compiled binaries and symbols
 *.exe
-!releases/*.exe
 *.dll
 !third_party/pdfium/bin/pdfium.dll
+releases/*.exe
+releases/*.zip
 *.pdb
 *.ilk
 *.obj

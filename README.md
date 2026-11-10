@@ -11,7 +11,7 @@
 [![UI](https://img.shields.io/badge/UI-Qt%206%20Widgets%20%2B%20Win32-41CD52?style=flat-square&logo=qt)](https://www.qt.io/)
 [![Database](https://img.shields.io/badge/Database-SQLite%203%20(WAL%20%2B%20FTS5)-003B57?style=flat-square&logo=sqlite)](https://www.sqlite.org/)
 [![AI](https://img.shields.io/badge/AI-ONNX%20Runtime%20CPU%20(MiniLM%20INT8)-8B5CF6?style=flat-square)](https://onnxruntime.ai/)
-[![Installer](https://img.shields.io/badge/Installer-NSIS%20Setup%20(x64)-EC1680?style=flat-square&logo=windows11)](releases/Lumen-v0.5.0-Setup-x64.exe)
+[![Installer](https://img.shields.io/badge/Installer-NSIS%20Setup%20(x64%20v0.5.1)-EC1680?style=flat-square&logo=windows11)](#installation-windows-10--11-x64)
 [![Privacy](https://img.shields.io/badge/Privacy-100%25%20Offline-10B981?style=flat-square)](https://github.com/ushalabs/Lumen)
 
 **Sole Developer: [UshaLabs](https://github.com/ushalabs)**
@@ -210,9 +210,9 @@ All performance measurements were independently recorded under reproducible cond
 
 ### Option 1: Standalone Setup Installer (Recommended)
 
-1. Download **[`Lumen-v0.5.0-Setup-x64.exe`](releases/Lumen-v0.5.0-Setup-x64.exe)** directly from this repository.
+1. Build or obtain **`Lumen-v0.5.1-Setup-x64.exe`** locally in `dist\` (or from [GitHub Releases](https://github.com/ushalabs/Lumen/releases)).
 2. Run the installer (`Per-User` install into `%LOCALAPPDATA%\Programs\Lumen` with no Administrator prompt required).
-3. Bundles Qt 6, MSVC x64 runtime DLLs, ONNX Runtime CPU, and `all-MiniLM-L6-v2` out of the box. Configures Windows startup inside the System Tray with the floating desktop icon and zero taskbar entry.
+3. Bundles Qt 6, MSVC x64 runtime DLLs, PDFium, ONNX Runtime CPU, and `all-MiniLM-L6-v2` out of the box. Configures Windows startup inside the System Tray with the floating desktop icon and zero taskbar entry.
 
 ### Option 2: Building from Source
 
@@ -232,7 +232,7 @@ cmake --build build --config Release --target Lumen
 To build the standalone Windows NSIS Setup installer + portable ZIP (`dist\`):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File packaging\build_setup.ps1 -Version "0.5.0"
+powershell -ExecutionPolicy Bypass -File packaging\build_setup.ps1 -Version "0.5.1"
 ```
 
 ---
