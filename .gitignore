@@ -7,6 +7,7 @@ cmake-build-*/
 
 # Compiled binaries and symbols
 *.exe
+!releases/*.exe
 *.dll
 *.pdb
 *.ilk

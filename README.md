@@ -241,7 +241,7 @@ Lumen is distributed as a self-contained **Windows 10/11 NSIS Setup Installer** 
 
 ### Option 1: Standalone Windows 10/11 Setup Installer (NSIS — Recommended)
 
-1. Download **`Lumen-v0.5.0-Setup-x64.exe`** from the [Releases](https://github.com/ushalabs/Lumen/releases) page.
+1. Download **[`Lumen-v0.5.0-Setup-x64.exe`](releases/Lumen-v0.5.0-Setup-x64.exe)** directly from the repository (or via the [Releases](https://github.com/ushalabs/Lumen/releases) page).
 2. Run the installer (`Per-User` install into `%LOCALAPPDATA%\Programs\Lumen` by default—no Administrator prompt required—or `/ALLUSERS` for machine-wide installation).
 3. Bundles the Qt 6 runtime, MSVC x64 C/C++ runtime DLLs, ONNX Runtime CPU engine, and the `all-MiniLM-L6-v2` semantic model out of the box so it runs on any clean Windows 10 (`1809+`) or Windows 11 x64 PC.
 
