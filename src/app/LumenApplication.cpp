@@ -97,7 +97,7 @@ void LumenApplication::shutdown() {
 
     // Immediately remove desktop icon and system tray icon before joining background threads
     if (m_searchBar) {
-        m_searchBar->collapsePopupAndDeactivate(false);
+        m_searchBar->collapsePopupAndDeactivate(false, false);
         m_searchBar->hide();
     }
     m_trayController.reset();

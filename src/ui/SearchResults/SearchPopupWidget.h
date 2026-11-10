@@ -8,6 +8,7 @@
 #include <QString>
 #include <QVector>
 #include <QWidget>
+#include <optional>
 
 namespace lumen::ui {
 
@@ -65,6 +66,8 @@ public:
     static constexpr int kPreviewHeight = 48;
     static constexpr int kFooterHeight = 0;
     static constexpr int kMaxVisibleRows = 6;
+    static constexpr int kLeftPaneWidth = 488;
+    static constexpr int kFullWorkspaceWidth = 908;
 
     explicit SearchPopupWidget(QWidget* parent = nullptr);
     ~SearchPopupWidget() override = default;
@@ -97,7 +100,11 @@ public:
 
     int resultCount() const noexcept;
     int selectedRow() const noexcept;
+    bool hasSelection() const noexcept;
     const search::FileSearchResult* selectedResult() const noexcept;
+    void clearResultSelection();
+    void clearInspectorSnapshot();
+    void showFileCopiedFeedback();
 
     void selectNext();
     void selectPrevious();
@@ -109,12 +116,14 @@ public:
 signals:
     void resultActivated(const lumen::search::FileSearchResult& result);
     void revealInExplorerRequested(const lumen::search::FileSearchResult& result);
+    void copyFileRequested(const lumen::search::FileSearchResult& result);
     void copyPathRequested(const lumen::search::FileSearchResult& result);
     void findRelatedRequested(const lumen::search::FileSearchResult& result);
     void togglePinRequested(const lumen::search::FileSearchResult& result);
     void searchModeChanged(lumen::search::SearchMode mode);
     void previewVisibilityChanged(bool visible);
     void selectedResultChanged(const lumen::search::FileSearchResult& result);
+    void selectionActiveChanged(bool hasSelection);
     void exitRelatedModeRequested();
 
 protected:
@@ -123,32 +132,40 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void leaveEvent(QEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     void updateListLayout();
+    void syncInspectorSnapshot(const search::FileSearchResult& item);
     void showContextMenuAt(const QPoint& localPos, const search::FileSearchResult& item);
     int leftPaneWidth() const noexcept;
     QRectF modePillRect(int modeIndex) const;
     QRectF backButtonRect() const;
     QRectF inspectorPaneRect() const;
+    QRectF inspectorCloseButtonRect(const QRectF& inspRect) const;
     QRectF inspectorPathBoxRect(const QRectF& inspRect) const;
     QRectF inspectorCopyPathButtonRect(const QRectF& inspRect) const;
     QRectF inspectorOpenButtonRect(const QRectF& inspRect) const;
     QRectF inspectorRevealButtonRect(const QRectF& inspRect) const;
+    QRectF inspectorCopyFileButtonRect(const QRectF& inspRect) const;
     QRectF inspectorRelatedButtonRect(const QRectF& inspRect) const;
     QRectF inspectorPinButtonRect(const QRectF& inspRect) const;
     int hoveredActionIndex(const QPointF& pos) const;
 
     QString m_queryText;
     QString m_previewText;
+    QString m_lastInspectorPreviewText;
     QString m_relatedSourceFileName;
+    std::optional<search::FileSearchResult> m_lastInspectorResult;
     double m_lastQueryMs = 0.0;
     search::SearchMode m_searchMode = search::SearchMode::All;
     bool m_previewVisible = false;
     bool m_darkTheme = false;
     bool m_indexingInProgress = false;
     bool m_pathHovered = false;
+    bool m_closeDetailsHovered = false;
     bool m_copiedFeedback = false;
+    bool m_copiedFileFeedback = false;
     int m_hoveredActionIdx = -1;
     int m_hoveredModeIdx = -1;
 

@@ -538,16 +538,24 @@ SearchPopupWidget::SearchPopupWidget(QWidget* parent)
     m_listView->setFocusPolicy(Qt::NoFocus);
     m_listView->setContextMenuPolicy(Qt::CustomContextMenu);
     m_listView->viewport()->setAutoFillBackground(false);
+    m_listView->viewport()->installEventFilter(this);
     m_listView->setStyleSheet(QStringLiteral(
         "QListView { background: transparent; border: none; outline: none; }"
-        "QScrollBar:vertical { width: 5px; background: transparent; margin: 6px 2px; border-radius: 2px; }"
-        "QScrollBar::handle:vertical { background: rgba(0, 0, 0, 38); border-radius: 2px; min-height: 24px; }"
-        "QScrollBar::handle:vertical:hover { background: rgba(236, 22, 128, 140); }"
-        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"));
+        "QScrollBar:vertical { width: 13px; background: #F1F2F6; margin: 6px 3px 6px 1px; border-radius: 6px; border: none; }"
+        "QScrollBar::handle:vertical { background: #B0B5C3; border-radius: 5px; min-height: 36px; margin: 1px; }"
+        "QScrollBar::handle:vertical:hover { background: #EC1680; }"
+        "QScrollBar::handle:vertical:pressed { background: #C8106C; }"
+        "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; background: transparent; }"));
     m_listView->hide();
 
     connect(m_listView, &QListView::clicked, this, [this](const QModelIndex& idx) {
+        if (!idx.isValid()) {
+            clearResultSelection();
+            return;
+        }
         m_listView->setCurrentIndex(idx);
+        m_listView->selectionModel()->select(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
         update();
     });
 
@@ -557,12 +565,22 @@ SearchPopupWidget::SearchPopupWidget(QWidget* parent)
         }
     });
 
-    connect(m_listView->selectionModel(), &QItemSelectionModel::currentRowChanged,
-            this, [this](const QModelIndex& current, const QModelIndex&) {
+    connect(m_listView->selectionModel(), &QItemSelectionModel::selectionChanged,
+            this, [this](const QItemSelection& selected, const QItemSelection&) {
                 m_previewText.clear();
-                if (const auto* res = m_model->resultAt(current.row())) {
-                    emit selectedResultChanged(*res);
+                m_copiedFeedback = false;
+                m_copiedFileFeedback = false;
+                const QModelIndexList rows = selected.indexes();
+                if (!rows.isEmpty()) {
+                    if (const auto* res = m_model->resultAt(rows.first().row())) {
+                        syncInspectorSnapshot(*res);
+                        emit selectedResultChanged(*res);
+                        emit selectionActiveChanged(true);
+                        update();
+                        return;
+                    }
                 }
+                emit selectionActiveChanged(false);
                 update();
             });
 
@@ -570,6 +588,7 @@ SearchPopupWidget::SearchPopupWidget(QWidget* parent)
         const QModelIndex idx = m_listView->indexAt(pos);
         if (idx.isValid()) {
             m_listView->setCurrentIndex(idx);
+            m_listView->selectionModel()->select(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
             if (const auto* res = m_model->resultAt(idx.row())) {
                 showContextMenuAt(m_listView->mapTo(this, pos), *res);
             }
@@ -587,26 +606,51 @@ void SearchPopupWidget::setQueryText(const QString& query) {
 void SearchPopupWidget::setSearchResults(QVector<search::FileSearchResult> results, double elapsedMs) {
     m_lastQueryMs = elapsedMs;
     m_previewText.clear();
+    m_lastInspectorPreviewText.clear();
+    m_lastInspectorResult.reset();
+    m_copiedFeedback = false;
+    m_copiedFileFeedback = false;
+    m_hoveredActionIdx = -1;
+    m_closeDetailsHovered = false;
+    m_pathHovered = false;
+
     m_model->setResults(std::move(results));
+    if (m_listView->selectionModel() != nullptr) {
+        QSignalBlocker blocker(m_listView->selectionModel());
+        m_listView->selectionModel()->clear();
+    }
+    m_listView->setCurrentIndex(QModelIndex());
+    m_listView->scrollToTop();
+
     if (m_model->rowCount() > 0) {
-        m_listView->setCurrentIndex(m_model->index(0, 0));
         m_listView->show();
-        if (const auto* res = m_model->resultAt(0)) {
-            emit selectedResultChanged(*res);
-        }
     } else {
         m_listView->hide();
     }
     updateListLayout();
+    emit selectionActiveChanged(false);
     update();
 }
 
 void SearchPopupWidget::clearResults() {
     m_lastQueryMs = 0.0;
     m_previewText.clear();
+    m_lastInspectorPreviewText.clear();
+    m_lastInspectorResult.reset();
     m_relatedSourceFileName.clear();
+    m_copiedFeedback = false;
+    m_copiedFileFeedback = false;
+    m_hoveredActionIdx = -1;
+    m_closeDetailsHovered = false;
+    m_pathHovered = false;
+    if (m_listView->selectionModel() != nullptr) {
+        QSignalBlocker blocker(m_listView->selectionModel());
+        m_listView->selectionModel()->clear();
+    }
+    m_listView->setCurrentIndex(QModelIndex());
     m_model->clear();
     m_listView->hide();
+    emit selectionActiveChanged(false);
     update();
 }
 
@@ -639,6 +683,9 @@ void SearchPopupWidget::togglePreview() {
 }
 
 void SearchPopupWidget::setPreviewText(const QString& text) {
+    if (hasSelection()) {
+        m_lastInspectorPreviewText = text;
+    }
     if (m_previewText != text) {
         m_previewText = text;
         update();
@@ -673,14 +720,64 @@ int SearchPopupWidget::resultCount() const noexcept {
 }
 
 int SearchPopupWidget::selectedRow() const noexcept {
-    if (!m_listView || !m_listView->currentIndex().isValid()) {
+    if (!m_listView || !m_listView->selectionModel()) {
         return -1;
     }
-    return m_listView->currentIndex().row();
+    const QModelIndexList rows = m_listView->selectionModel()->selectedRows();
+    if (!rows.isEmpty() && rows.first().isValid()) {
+        return rows.first().row();
+    }
+    return -1;
+}
+
+bool SearchPopupWidget::hasSelection() const noexcept {
+    return selectedRow() >= 0;
 }
 
 const search::FileSearchResult* SearchPopupWidget::selectedResult() const noexcept {
     return m_model ? m_model->resultAt(selectedRow()) : nullptr;
+}
+
+void SearchPopupWidget::syncInspectorSnapshot(const search::FileSearchResult& item) {
+    m_lastInspectorResult = item;
+    m_lastInspectorPreviewText = m_previewText;
+}
+
+void SearchPopupWidget::clearInspectorSnapshot() {
+    if (!hasSelection()) {
+        m_lastInspectorResult.reset();
+        m_lastInspectorPreviewText.clear();
+    }
+}
+
+void SearchPopupWidget::showFileCopiedFeedback() {
+    m_copiedFileFeedback = true;
+    update();
+    QTimer::singleShot(1400, this, [this]() {
+        m_copiedFileFeedback = false;
+        update();
+    });
+}
+
+void SearchPopupWidget::clearResultSelection() {
+    if (!m_listView) {
+        return;
+    }
+    const bool hadSel = hasSelection();
+    if (m_listView->selectionModel() != nullptr) {
+        m_listView->selectionModel()->clear();
+    }
+    m_listView->setCurrentIndex(QModelIndex());
+    m_hoveredActionIdx = -1;
+    m_closeDetailsHovered = false;
+    m_pathHovered = false;
+    m_copiedFeedback = false;
+    m_copiedFileFeedback = false;
+    QToolTip::hideText();
+    update();
+    if (!hadSel) {
+        emit selectionActiveChanged(false);
+    }
 }
 
 void SearchPopupWidget::selectNext() {
@@ -688,9 +785,11 @@ void SearchPopupWidget::selectNext() {
     if (count <= 0) {
         return;
     }
-    const int nextRow = (selectedRow() + 1) % count;
+    const int cur = selectedRow();
+    const int nextRow = (cur < 0) ? 0 : ((cur + 1) % count);
     const QModelIndex idx = m_model->index(nextRow, 0);
     m_listView->setCurrentIndex(idx);
+    m_listView->selectionModel()->select(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     m_listView->scrollTo(idx);
 }
 
@@ -699,9 +798,11 @@ void SearchPopupWidget::selectPrevious() {
     if (count <= 0) {
         return;
     }
-    const int prevRow = (selectedRow() <= 0) ? (count - 1) : (selectedRow() - 1);
+    const int cur = selectedRow();
+    const int prevRow = (cur <= 0) ? (count - 1) : (cur - 1);
     const QModelIndex idx = m_model->index(prevRow, 0);
     m_listView->setCurrentIndex(idx);
+    m_listView->selectionModel()->select(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     m_listView->scrollTo(idx);
 }
 
@@ -738,8 +839,8 @@ QString SearchPopupWidget::statusHeadline() const {
 }
 
 int SearchPopupWidget::leftPaneWidth() const noexcept {
-    // 52% left results pane / 48% spacious right summary & preview pane
-    return std::max(260, (width() * 52) / 100);
+    // Keep left results list constant at kLeftPaneWidth (488px) so sliding details out never reflows items
+    return std::max(260, std::min(width(), kLeftPaneWidth));
 }
 
 void SearchPopupWidget::resizeEvent(QResizeEvent* event) {
@@ -771,7 +872,12 @@ QRectF SearchPopupWidget::backButtonRect() const {
 QRectF SearchPopupWidget::inspectorPaneRect() const {
     const int leftW = leftPaneWidth();
     const int bodyH = std::max(0, height() - kHeaderHeight);
-    return QRectF(leftW, kHeaderHeight, width() - leftW - 1.0, bodyH);
+    const int fixedInspW = std::max(360, kFullWorkspaceWidth - kLeftPaneWidth);
+    return QRectF(leftW, kHeaderHeight, fixedInspW - 1.0, bodyH);
+}
+
+QRectF SearchPopupWidget::inspectorCloseButtonRect(const QRectF& inspRect) const {
+    return QRectF(inspRect.right() - 42.0, inspRect.top() + 18.0, 22.0, 22.0);
 }
 
 QRectF SearchPopupWidget::inspectorPathBoxRect(const QRectF& inspRect) const {
@@ -797,20 +903,26 @@ QRectF SearchPopupWidget::inspectorRelatedButtonRect(const QRectF& inspRect) con
     return QRectF(rightEdge - 72.0, barTop, 32.0, 32.0);
 }
 
-QRectF SearchPopupWidget::inspectorRevealButtonRect(const QRectF& inspRect) const {
+QRectF SearchPopupWidget::inspectorCopyFileButtonRect(const QRectF& inspRect) const {
     const qreal barTop = inspRect.bottom() - 48.0;
     const qreal rightEdge = inspRect.right() - 22.0;
     return QRectF(rightEdge - 112.0, barTop, 32.0, 32.0);
 }
 
-QRectF SearchPopupWidget::inspectorOpenButtonRect(const QRectF& inspRect) const {
+QRectF SearchPopupWidget::inspectorRevealButtonRect(const QRectF& inspRect) const {
     const qreal barTop = inspRect.bottom() - 48.0;
     const qreal rightEdge = inspRect.right() - 22.0;
     return QRectF(rightEdge - 152.0, barTop, 32.0, 32.0);
 }
 
+QRectF SearchPopupWidget::inspectorOpenButtonRect(const QRectF& inspRect) const {
+    const qreal barTop = inspRect.bottom() - 48.0;
+    const qreal rightEdge = inspRect.right() - 22.0;
+    return QRectF(rightEdge - 192.0, barTop, 32.0, 32.0);
+}
+
 int SearchPopupWidget::hoveredActionIndex(const QPointF& pos) const {
-    if (resultCount() <= 0) {
+    if (resultCount() <= 0 || !hasSelection() || width() <= leftPaneWidth() + 40) {
         return -1;
     }
     const QRectF inspRect = inspectorPaneRect();
@@ -819,8 +931,9 @@ int SearchPopupWidget::hoveredActionIndex(const QPointF& pos) const {
     }
     if (inspectorOpenButtonRect(inspRect).contains(pos)) return 0;
     if (inspectorRevealButtonRect(inspRect).contains(pos)) return 1;
-    if (inspectorRelatedButtonRect(inspRect).contains(pos)) return 2;
-    if (inspectorPinButtonRect(inspRect).contains(pos)) return 3;
+    if (inspectorCopyFileButtonRect(inspRect).contains(pos)) return 2;
+    if (inspectorRelatedButtonRect(inspRect).contains(pos)) return 3;
+    if (inspectorPinButtonRect(inspRect).contains(pos)) return 4;
     return -1;
 }
 
@@ -843,28 +956,38 @@ void SearchPopupWidget::mouseMoveEvent(QMouseEvent* event) {
     }
 
     bool newPathHover = false;
+    bool newCloseHover = false;
     int newActionHover = -1;
-    if (resultCount() > 0) {
+    if (resultCount() > 0 && hasSelection() && width() > leftPaneWidth() + 40) {
         const QRectF inspRect = inspectorPaneRect();
         newPathHover = inspectorPathBoxRect(inspRect).contains(pos);
+        newCloseHover = inspectorCloseButtonRect(inspRect).contains(pos);
         newActionHover = hoveredActionIndex(pos);
     }
 
-    if (newPathHover != m_pathHovered || newActionHover != m_hoveredActionIdx) {
+    if (newPathHover != m_pathHovered ||
+        newCloseHover != m_closeDetailsHovered ||
+        newActionHover != m_hoveredActionIdx) {
         m_pathHovered = newPathHover;
+        m_closeDetailsHovered = newCloseHover;
         m_hoveredActionIdx = newActionHover;
         needUpdate = true;
 
         if (m_hoveredActionIdx >= 0) {
             const auto* sel = selectedResult();
             const bool isDir = (sel != nullptr && sel->isDirectory);
-            const QString kTips[4] = {
+            const QString kTips[5] = {
                 isDir ? QStringLiteral("Open folder (Enter)") : QStringLiteral("Open file (Enter)"),
                 QStringLiteral("Reveal in File Explorer (Ctrl+Enter)"),
+                m_copiedFileFeedback
+                    ? (isDir ? QStringLiteral("Folder copied!") : QStringLiteral("File copied!"))
+                    : (isDir ? QStringLiteral("Copy folder (Ctrl+C)") : QStringLiteral("Copy file (Ctrl+C)")),
                 QStringLiteral("Find related documents (Ctrl+R)"),
                 QStringLiteral("Pin / Unpin favorite (Ctrl+D)")
             };
             QToolTip::showText(event->globalPosition().toPoint(), kTips[m_hoveredActionIdx], this);
+        } else if (m_closeDetailsHovered) {
+            QToolTip::showText(event->globalPosition().toPoint(), QStringLiteral("Close details"), this);
         } else if (m_pathHovered) {
             QToolTip::showText(event->globalPosition().toPoint(), QStringLiteral("Copy path (Ctrl+Shift+C)"), this);
         } else {
@@ -879,14 +1002,30 @@ void SearchPopupWidget::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void SearchPopupWidget::leaveEvent(QEvent* event) {
-    if (m_pathHovered || m_hoveredActionIdx != -1 || m_hoveredModeIdx != -1) {
+    if (m_pathHovered || m_closeDetailsHovered || m_hoveredActionIdx != -1 || m_hoveredModeIdx != -1) {
         m_pathHovered = false;
+        m_closeDetailsHovered = false;
         m_hoveredActionIdx = -1;
         m_hoveredModeIdx = -1;
         QToolTip::hideText();
         update();
     }
     QWidget::leaveEvent(event);
+}
+
+bool SearchPopupWidget::eventFilter(QObject* watched, QEvent* event) {
+    if (m_listView && watched == m_listView->viewport() &&
+        event->type() == QEvent::MouseButtonPress) {
+        auto* mouseEvt = static_cast<QMouseEvent*>(event);
+        if (mouseEvt->button() == Qt::LeftButton) {
+            const QModelIndex idx = m_listView->indexAt(mouseEvt->position().toPoint());
+            if (!idx.isValid() && hasSelection()) {
+                clearResultSelection();
+                return true;
+            }
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 void SearchPopupWidget::mousePressEvent(QMouseEvent* event) {
@@ -909,9 +1048,14 @@ void SearchPopupWidget::mousePressEvent(QMouseEvent* event) {
                     }
                 }
             }
-        } else if (resultCount() > 0) {
+        } else if (resultCount() > 0 && hasSelection() && width() > leftPaneWidth() + 40) {
             const QRectF inspRect = inspectorPaneRect();
             if (inspRect.contains(pos)) {
+                if (inspectorCloseButtonRect(inspRect).contains(pos)) {
+                    clearResultSelection();
+                    event->accept();
+                    return;
+                }
                 if (const auto* sel = selectedResult()) {
                     if (inspectorCopyPathButtonRect(inspRect).contains(pos) ||
                         inspectorPathBoxRect(inspRect).contains(pos)) {
@@ -932,6 +1076,17 @@ void SearchPopupWidget::mousePressEvent(QMouseEvent* event) {
                     }
                     if (inspectorRevealButtonRect(inspRect).contains(pos)) {
                         emit revealInExplorerRequested(*sel);
+                        event->accept();
+                        return;
+                    }
+                    if (inspectorCopyFileButtonRect(inspRect).contains(pos)) {
+                        emit copyFileRequested(*sel);
+                        m_copiedFileFeedback = true;
+                        update();
+                        QTimer::singleShot(1400, this, [this]() {
+                            m_copiedFileFeedback = false;
+                            update();
+                        });
                         event->accept();
                         return;
                     }
@@ -970,6 +1125,9 @@ void SearchPopupWidget::showContextMenuAt(const QPoint& localPos, const search::
                                           ? QStringLiteral("Open Folder\tEnter")
                                           : QStringLiteral("Open File\tEnter"));
     QAction* revealAct = menu.addAction(QStringLiteral("Reveal in File Explorer\tCtrl+Enter"));
+    QAction* copyItemAct = menu.addAction(item.isDirectory
+                                              ? QStringLiteral("Copy Folder\tCtrl+C")
+                                              : QStringLiteral("Copy File\tCtrl+C"));
     QAction* previewAct = menu.addAction(m_previewVisible
                                              ? QStringLiteral("Compact Summary View\tCtrl+P")
                                              : QStringLiteral("Expand Summary View\tCtrl+P"));
@@ -988,6 +1146,14 @@ void SearchPopupWidget::showContextMenuAt(const QPoint& localPos, const search::
         emit resultActivated(item);
     } else if (chosen == revealAct) {
         emit revealInExplorerRequested(item);
+    } else if (chosen == copyItemAct) {
+        emit copyFileRequested(item);
+        m_copiedFileFeedback = true;
+        update();
+        QTimer::singleShot(1400, this, [this]() {
+            m_copiedFileFeedback = false;
+            update();
+        });
     } else if (chosen == previewAct) {
         togglePreview();
     } else if (chosen == relatedAct) {
@@ -1086,9 +1252,13 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
                                          ? QStringLiteral("1 result")
                                          : QStringLiteral("%1 results").arg(resultCount());
             painter.setPen(theme.textSecondary);
-            painter.drawText(QRectF(bounds.right() - 150.0, 0.0, 132.0, kHeaderHeight),
-                             Qt::AlignRight | Qt::AlignVCenter,
-                             countStr);
+            const qreal countLeft = std::max(trackRect.right() + 6.0, bounds.right() - 140.0);
+            const qreal countW = std::max(0.0, bounds.right() - 16.0 - countLeft);
+            if (countW >= 40.0) {
+                painter.drawText(QRectF(countLeft, 0.0, countW, kHeaderHeight),
+                                 Qt::AlignRight | Qt::AlignVCenter,
+                                 countStr);
+            }
         }
     }
 
@@ -1121,9 +1291,9 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
         painter.drawText(QRectF(bounds.left() + 24.0, center.y() + 4.0, bounds.width() - 48.0, 20.0),
                          Qt::AlignCenter,
                          subtitle);
-    } else {
+    } else if (width() > leftPaneWidth() + 4) {
         // ---------------------------------------------------------------------
-        // 3. Dual-Column Split: Left Results | Spacious Right Preview Panel
+        // 3. Sliding Right Inspector Panel (revealed only when a row is selected)
         // ---------------------------------------------------------------------
         const QRectF inspRect = inspectorPaneRect();
 
@@ -1135,18 +1305,31 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
         painter.setPen(QPen(theme.borderSubtle, 1.0));
         painter.drawLine(QPointF(inspRect.left(), inspRect.top()), QPointF(inspRect.left(), inspRect.bottom()));
 
-        if (const auto* sel = selectedResult()) {
+        const auto* activeSel = selectedResult();
+        const auto* sel = activeSel ? activeSel : (m_lastInspectorResult ? &(*m_lastInspectorResult) : nullptr);
+        if (sel != nullptr) {
             const qreal pad = 22.0;
             const qreal contentLeft = inspRect.left() + pad;
             const qreal contentWidth = inspRect.width() - pad * 2.0;
             const QString extLower = sel->extension.toLower();
+
+            // Subtle Close-Details (X) button in top-right of inspector
+            const QRectF closeBtn = inspectorCloseButtonRect(inspRect);
+            painter.setPen(QPen(m_closeDetailsHovered ? QColor(236, 22, 128, 130) : Qt::transparent, 1.0));
+            painter.setBrush(m_closeDetailsHovered ? QColor(236, 22, 128, 22) : Qt::transparent);
+            painter.drawRoundedRect(closeBtn, 6.0, 6.0);
+            QPen xPen(m_closeDetailsHovered ? theme.brandPink : theme.textMuted, 1.45, Qt::SolidLine, Qt::RoundCap);
+            painter.setPen(xPen);
+            const QPointF xc = closeBtn.center();
+            painter.drawLine(QPointF(xc.x() - 3.5, xc.y() - 3.5), QPointF(xc.x() + 3.5, xc.y() + 3.5));
+            painter.drawLine(QPointF(xc.x() + 3.5, xc.y() - 3.5), QPointF(xc.x() - 3.5, xc.y() + 3.5));
 
             // A. Typographic Hierarchy: Larger Bold Filename + Muted File/Folder Type Subtitle
             const QRectF hdrIconRect(contentLeft, inspRect.top() + 18.0, 44.0, 44.0);
             BrandingIcon::paintFileTypeIcon(&painter, hdrIconRect, extLower, false, true, sel->isDirectory);
 
             const qreal titleLeft = hdrIconRect.right() + 14.0;
-            const qreal titleAvailW = inspRect.right() - pad - titleLeft;
+            const qreal titleAvailW = std::max(60.0, closeBtn.left() - 10.0 - titleLeft);
 
             const QFont titleFont = ThemeTokens::makeFont(15, QFont::DemiBold);
             painter.setFont(titleFont);
@@ -1262,7 +1445,8 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
             painter.drawRoundedRect(summaryBoxRect, 10.0, 10.0);
 
             const QRectF passageRect = summaryBoxRect.adjusted(14.0, 12.0, -14.0, -12.0);
-            QString bodyText = !m_previewText.isEmpty() ? m_previewText : sel->snippet;
+            const QString activePreview = activeSel ? m_previewText : m_lastInspectorPreviewText;
+            QString bodyText = !activePreview.isEmpty() ? activePreview : sel->snippet;
             if (bodyText.isEmpty()) {
                 bodyText = sel->isDirectory
                                ? QStringLiteral("Folder contents preview unavailable.")
@@ -1282,6 +1466,7 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
             // E. Streamlined Icon-Only Bottom-Right Action Control Group
             const QRectF openBtn = inspectorOpenButtonRect(inspRect);
             const QRectF revealBtn = inspectorRevealButtonRect(inspRect);
+            const QRectF copyFileBtn = inspectorCopyFileButtonRect(inspRect);
             const QRectF relatedBtn = inspectorRelatedButtonRect(inspRect);
             const QRectF pinBtn = inspectorPinButtonRect(inspRect);
 
@@ -1307,17 +1492,24 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
                 revealBtn.adjusted(7.0, 7.0, -7.0, -7.0),
                 m_hoveredActionIdx == 1 ? theme.brandPink : theme.iconPrimary);
 
-            drawIconBtnBg(relatedBtn, 2, false);
+            drawIconBtnBg(copyFileBtn, 2, m_copiedFileFeedback);
+            BrandingIcon::paintClipboardIcon(
+                &painter,
+                copyFileBtn.adjusted(7.0, 7.0, -7.0, -7.0),
+                (m_copiedFileFeedback || m_hoveredActionIdx == 2) ? theme.brandPink : theme.iconPrimary,
+                m_copiedFileFeedback);
+
+            drawIconBtnBg(relatedBtn, 3, false);
             BrandingIcon::paintRelatedIcon(
                 &painter,
                 relatedBtn.adjusted(7.0, 7.0, -7.0, -7.0),
-                m_hoveredActionIdx == 2 ? theme.brandPink : theme.iconPrimary);
+                m_hoveredActionIdx == 3 ? theme.brandPink : theme.iconPrimary);
 
-            drawIconBtnBg(pinBtn, 3, sel->isPinned);
+            drawIconBtnBg(pinBtn, 4, sel->isPinned);
             BrandingIcon::paintPinIcon(
                 &painter,
                 pinBtn.adjusted(7.0, 7.0, -7.0, -7.0),
-                (sel->isPinned || m_hoveredActionIdx == 3) ? theme.brandPink : theme.iconPrimary,
+                (sel->isPinned || m_hoveredActionIdx == 4) ? theme.brandPink : theme.iconPrimary,
                 sel->isPinned);
         }
     }

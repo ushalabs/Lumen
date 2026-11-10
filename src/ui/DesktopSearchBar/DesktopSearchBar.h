@@ -28,9 +28,9 @@ public:
 
     static constexpr int kBarCardHeight = 56;
     static constexpr int kIconSize = kBarCardHeight + kHorizontalShadow; // 74px widget -> 56x56 pure pink icon
-    static constexpr int kBarWidth = 464 + kHorizontalShadow;         // 482px widget -> 464px visible bar
+    static constexpr int kBarWidth = 488 + kHorizontalShadow;         // 506px widget -> 488px visible half-width bar
     static constexpr int kBarHeight = kBarCardHeight + kVerticalShadow; // 74px widget -> 56px visible bar
-    static constexpr int kPopupWidth = 900 + kHorizontalShadow;       // 918px widget -> 900px visible workspace
+    static constexpr int kPopupWidth = 908 + kHorizontalShadow;       // 926px widget -> 908px visible full workspace
     static constexpr int kPopupGap = 0;
     static constexpr int kPopupHeight = 140;
     static constexpr int kExpandedHeight = kBarHeight + kPopupGap + kPopupHeight;
@@ -48,7 +48,7 @@ public:
 
     void applySavedOrDefaultPosition();
     void activateAndFocusSearch(bool animateSlide = true);
-    void collapsePopupAndDeactivate(bool clearQuery = false);
+    void collapsePopupAndDeactivate(bool clearQuery = false, bool animateSlide = true);
 
     bool isBarExpanded() const noexcept { return m_barExpanded; }
     bool isPopupExpanded() const noexcept { return m_popupExpanded; }
@@ -72,6 +72,7 @@ public:
     void notifyIndexUpdated();
 
     void revealResultInExplorer(const search::FileSearchResult& result);
+    void copyResultFileToClipboard(const search::FileSearchResult& result);
     void copyResultPathToClipboard(const search::FileSearchResult& result);
     void triggerFindRelatedForSelected();
 
@@ -83,6 +84,7 @@ signals:
     void searchCompleted(int resultCount, double elapsedMs);
     void fileResultActivated(const lumen::search::FileSearchResult& result);
     void fileRevealedInExplorer(const lumen::search::FileSearchResult& result);
+    void fileCopiedToClipboard(const QString& path);
     void filePathCopied(const QString& path);
 
 protected:
@@ -104,6 +106,9 @@ private slots:
 
 private:
     void setPopupExpanded(bool expanded);
+    void setDetailsExpanded(bool expanded);
+    void startBarSlideClose();
+    void finishBarCollapse();
     void applyOpenBarGeometry();
     void updateExpandedGeometry();
     void updateSearchInputGeometry();
@@ -121,6 +126,7 @@ private:
     SearchPopupWidget* m_popupWidget = nullptr;
     QVariantAnimation* m_slideAnim = nullptr;
     QVariantAnimation* m_popupAnim = nullptr;
+    QVariantAnimation* m_detailsAnim = nullptr;
 
     QThreadPool m_searchPool;
     search::FileSearchEngine m_searchEngine;
@@ -130,8 +136,14 @@ private:
 
     qreal m_slideProgress = 0.0;
     qreal m_popupProgress = 0.0;
+    qreal m_detailsProgress = 0.0;
     bool m_barExpanded = false;
     bool m_popupExpanded = false;
+    bool m_detailsExpanded = false;
+    bool m_closingPopup = false;
+    bool m_closingBar = false;
+    bool m_closeBarAfterPopup = false;
+    bool m_clearQueryOnClose = false;
     bool m_slidesLeft = true;
     bool m_isSearchActive = false;
     bool m_clearHovered = false;

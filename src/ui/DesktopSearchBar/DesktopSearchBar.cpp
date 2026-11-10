@@ -16,6 +16,7 @@
 #include <QDir>
 #include <QEasingCurve>
 #include <QEvent>
+#include <QFileInfo>
 #include <QFont>
 #include <QGuiApplication>
 #include <QKeyEvent>
@@ -30,6 +31,7 @@
 #include <QRunnable>
 #include <QScreen>
 #include <QShowEvent>
+#include <QSignalBlocker>
 #include <QTimer>
 #include <QUrl>
 
@@ -64,6 +66,15 @@ DesktopSearchBar::DesktopSearchBar(QWidget* parent)
         }
         update();
     });
+    connect(m_slideAnim, &QVariantAnimation::finished, this, [this]() {
+        if (m_closingBar) {
+            finishBarCollapse();
+        } else if (m_barExpanded && !m_popupExpanded) {
+            m_slideProgress = 1.0;
+            applyOpenBarGeometry();
+            update();
+        }
+    });
 
     m_popupAnim = new QVariantAnimation(this);
     m_popupAnim->setDuration(140);
@@ -76,7 +87,48 @@ DesktopSearchBar::DesktopSearchBar(QWidget* parent)
         update();
     });
     connect(m_popupAnim, &QVariantAnimation::finished, this, [this]() {
-        m_popupProgress = 1.0;
+        if (m_closingPopup) {
+            m_closingPopup = false;
+            m_popupExpanded = false;
+            m_popupProgress = 0.0;
+            m_detailsAnim->stop();
+            m_detailsProgress = 0.0;
+            m_detailsExpanded = false;
+            m_popupWidget->clearMask();
+            m_popupWidget->hide();
+            m_popupWidget->clearInspectorSnapshot();
+            m_popupWidget->clearResults();
+            emit popupVisibilityChanged(false);
+
+            if (m_closeBarAfterPopup) {
+                m_closeBarAfterPopup = false;
+                startBarSlideClose();
+            } else {
+                m_slideProgress = 1.0;
+                applyOpenBarGeometry();
+                update();
+            }
+        } else if (m_popupExpanded) {
+            m_popupProgress = 1.0;
+            updateExpandedGeometry();
+        }
+    });
+
+    m_detailsAnim = new QVariantAnimation(this);
+    m_detailsAnim->setDuration(150);
+    m_detailsAnim->setEasingCurve(QEasingCurve::OutCubic);
+    connect(m_detailsAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant& value) {
+        m_detailsProgress = value.toReal();
+        if (m_popupExpanded) {
+            updateExpandedGeometry();
+        }
+        update();
+    });
+    connect(m_detailsAnim, &QVariantAnimation::finished, this, [this]() {
+        m_detailsProgress = m_detailsExpanded ? 1.0 : 0.0;
+        if (!m_detailsExpanded && m_popupWidget != nullptr) {
+            m_popupWidget->clearInspectorSnapshot();
+        }
         if (m_popupExpanded) {
             updateExpandedGeometry();
         }
@@ -92,7 +144,7 @@ DesktopSearchBar::DesktopSearchBar(QWidget* parent)
     m_searchEdit->hide();
 
     m_popupWidget = new SearchPopupWidget(this);
-    m_popupWidget->setGeometry(kShadowLeft, kShadowTop + kBarCardHeight, kPopupWidth - kHorizontalShadow, kPopupHeight);
+    m_popupWidget->setGeometry(kShadowLeft, kShadowTop + kBarCardHeight, kBarWidth - kHorizontalShadow, kPopupHeight);
     m_popupWidget->hide();
 
     connect(m_searchEdit, &QLineEdit::textChanged, this, &DesktopSearchBar::onSearchTextChanged);
@@ -119,8 +171,16 @@ DesktopSearchBar::DesktopSearchBar(QWidget* parent)
                 dispatchInspectorPreviewFetch(res);
             });
 
+    connect(m_popupWidget, &SearchPopupWidget::selectionActiveChanged,
+            this, [this](bool hasSel) {
+                setDetailsExpanded(hasSel);
+            });
+
     connect(m_popupWidget, &SearchPopupWidget::revealInExplorerRequested,
             this, &DesktopSearchBar::revealResultInExplorer);
+
+    connect(m_popupWidget, &SearchPopupWidget::copyFileRequested,
+            this, &DesktopSearchBar::copyResultFileToClipboard);
 
     connect(m_popupWidget, &SearchPopupWidget::copyPathRequested,
             this, &DesktopSearchBar::copyResultPathToClipboard);
@@ -158,7 +218,7 @@ DesktopSearchBar::DesktopSearchBar(QWidget* parent)
             if (isDesktopShell) {
                 m_keepAboveShellTemp = true;
                 platform::windows::DesktopIntegration::raiseAboveShellDesktopNoActivate(myHwnd);
-            } else if (!m_isSearchActive && !m_barExpanded) {
+            } else if (!m_isSearchActive && !m_barExpanded && !m_closingBar && !m_closingPopup) {
                 m_keepAboveShellTemp = false;
                 platform::windows::DesktopIntegration::placeOnDesktopBottom(myHwnd);
             }
@@ -320,10 +380,16 @@ void DesktopSearchBar::activateAndFocusSearch(bool animateSlide) {
         show();
     }
 
+    const bool wasClosing = m_closingBar || m_closingPopup;
+    m_closingBar = false;
+    m_closingPopup = false;
+    m_closeBarAfterPopup = false;
+    m_clearQueryOnClose = false;
+
     m_isSearchActive = true;
     m_slidesLeft = shouldSlideLeftFromAnchor(m_iconAnchorPos);
 
-    const bool wasExpanded = m_barExpanded;
+    const bool wasExpanded = m_barExpanded && !wasClosing;
     m_barExpanded = true;
 
     const HWND hwnd = reinterpret_cast<HWND>(winId());
@@ -340,10 +406,13 @@ void DesktopSearchBar::activateAndFocusSearch(bool animateSlide) {
         m_slideProgress = 1.0;
         setPopupExpanded(true);
         dispatchAsyncSearch(trimmed);
-    } else if (!wasExpanded && animateSlide) {
+    } else if ((!wasExpanded || wasClosing) && animateSlide) {
         m_slideAnim->stop();
-        m_slideProgress = 0.0;
-        m_slideAnim->setStartValue(0.0);
+        if (!wasClosing) {
+            m_slideProgress = 0.0;
+        }
+        m_slideAnim->setDuration(145);
+        m_slideAnim->setStartValue(m_slideProgress);
         m_slideAnim->setEndValue(1.0);
         applyOpenBarGeometry();
         m_slideAnim->start();
@@ -357,32 +426,52 @@ void DesktopSearchBar::activateAndFocusSearch(bool animateSlide) {
     update();
 }
 
-void DesktopSearchBar::collapsePopupAndDeactivate(bool clearQuery) {
-    if (m_activeCancelToken) {
-        m_activeCancelToken->store(true, std::memory_order_relaxed);
-    }
-    ++m_previewGeneration;
+void DesktopSearchBar::startBarSlideClose() {
+    m_closingBar = true;
+    m_barExpanded = true;
+    m_searchEdit->deselect();
+    m_searchEdit->clearFocus();
 
     m_slideAnim->stop();
-    m_slideProgress = 0.0;
-    if (m_popupAnim != nullptr) {
-        m_popupAnim->stop();
-    }
-    m_popupProgress = 0.0;
+    m_slideAnim->setDuration(135);
+    m_slideAnim->setStartValue(m_slideProgress);
+    m_slideAnim->setEndValue(0.0);
+    applyOpenBarGeometry();
+    m_slideAnim->start();
+    update();
+}
 
-    if (clearQuery && !m_searchEdit->text().isEmpty()) {
+void DesktopSearchBar::finishBarCollapse() {
+    m_closingBar = false;
+    m_closingPopup = false;
+    m_closeBarAfterPopup = false;
+    m_popupExpanded = false;
+    m_detailsExpanded = false;
+    m_barExpanded = false;
+    m_isSearchActive = false;
+    m_clearHovered = false;
+    m_slideProgress = 0.0;
+    m_popupProgress = 0.0;
+    m_detailsProgress = 0.0;
+
+    if (m_clearQueryOnClose && m_searchEdit != nullptr && !m_searchEdit->text().isEmpty()) {
+        const QSignalBlocker blocker(m_searchEdit);
         m_searchEdit->clear();
+        if (m_popupWidget != nullptr) {
+            m_popupWidget->setQueryText(QString());
+        }
     }
+    m_clearQueryOnClose = false;
+
     if (m_popupWidget != nullptr) {
         m_popupWidget->setPreviewVisible(false);
         m_popupWidget->setPreviewText(QString());
         m_popupWidget->setRelatedSourceFileName(QString());
+        m_popupWidget->clearMask();
+        m_popupWidget->hide();
+        m_popupWidget->clearInspectorSnapshot();
+        m_popupWidget->clearResults();
     }
-
-    setPopupExpanded(false);
-    m_barExpanded = false;
-    m_isSearchActive = false;
-    m_clearHovered = false;
 
     m_searchEdit->deselect();
     m_searchEdit->clearFocus();
@@ -401,6 +490,48 @@ void DesktopSearchBar::collapsePopupAndDeactivate(bool clearQuery) {
 
     emit barVisibilityExpandedChanged(false);
     update();
+}
+
+void DesktopSearchBar::collapsePopupAndDeactivate(bool clearQuery, bool animateSlide) {
+    if (m_activeCancelToken) {
+        m_activeCancelToken->store(true, std::memory_order_relaxed);
+    }
+    ++m_previewGeneration;
+
+    if (!animateSlide) {
+        m_slideAnim->stop();
+        if (m_popupAnim != nullptr) {
+            m_popupAnim->stop();
+        }
+        if (m_detailsAnim != nullptr) {
+            m_detailsAnim->stop();
+        }
+        m_clearQueryOnClose = clearQuery;
+        finishBarCollapse();
+        return;
+    }
+
+    if (!m_barExpanded && !m_popupExpanded && !m_closingBar && !m_closingPopup) {
+        return;
+    }
+    if (m_closingBar && !m_popupExpanded) {
+        if (clearQuery) {
+            m_clearQueryOnClose = true;
+        }
+        return;
+    }
+
+    m_clearQueryOnClose = clearQuery;
+    m_isSearchActive = false;
+    m_clearHovered = false;
+
+    if (m_popupExpanded) {
+        m_closeBarAfterPopup = true;
+        setPopupExpanded(false);
+        return;
+    }
+
+    startBarSlideClose();
 }
 
 QString DesktopSearchBar::searchText() const {
@@ -496,45 +627,70 @@ void DesktopSearchBar::applyOpenBarGeometry() {
     updateSearchInputGeometry();
 }
 
-void DesktopSearchBar::setPopupExpanded(bool expanded) {
-    if (m_popupExpanded == expanded) {
-        if (m_popupExpanded) {
-            updateExpandedGeometry();
-        }
+void DesktopSearchBar::setDetailsExpanded(bool expanded) {
+    if (m_detailsExpanded == expanded &&
+        ((expanded && m_detailsProgress >= 0.999) || (!expanded && m_detailsProgress <= 0.001))) {
         return;
     }
+    m_detailsExpanded = expanded;
+    if (!m_popupExpanded) {
+        m_detailsAnim->stop();
+        m_detailsProgress = 0.0;
+        return;
+    }
+    m_detailsAnim->stop();
+    m_detailsAnim->setDuration(150);
+    m_detailsAnim->setStartValue(m_detailsProgress);
+    m_detailsAnim->setEndValue(expanded ? 1.0 : 0.0);
+    m_detailsAnim->start();
+}
 
+void DesktopSearchBar::setPopupExpanded(bool expanded) {
     if (expanded) {
+        const bool needOpen = !m_popupExpanded || m_closingPopup;
+        m_closingPopup = false;
+        m_closingBar = false;
+        m_closeBarAfterPopup = false;
         m_slideAnim->stop();
         m_slideProgress = 1.0;
         m_barExpanded = true;
         m_popupExpanded = true;
         m_searchEdit->show();
 
-        m_popupAnim->stop();
-        m_popupProgress = 0.0;
-        m_popupAnim->setStartValue(0.0);
-        m_popupAnim->setEndValue(1.0);
-        m_popupAnim->start();
-        updateExpandedGeometry();
-        m_popupWidget->show();
-    } else {
-        m_popupAnim->stop();
-        m_popupProgress = 0.0;
-        m_popupExpanded = false;
-        m_popupWidget->clearMask();
-        m_popupWidget->hide();
-        if (m_barExpanded) {
-            m_slideProgress = 1.0;
-            applyOpenBarGeometry();
+        if (needOpen) {
+            m_popupAnim->stop();
+            m_popupAnim->setDuration(140);
+            m_popupAnim->setStartValue(qBound(0.0, m_popupProgress, 1.0));
+            m_popupAnim->setEndValue(1.0);
+            m_popupAnim->start();
+            updateExpandedGeometry();
+            m_popupWidget->show();
         } else {
-            setFixedSize(kIconSize, kIconSize);
-            move(m_iconAnchorPos);
-            m_searchEdit->hide();
+            updateExpandedGeometry();
         }
+    } else {
+        if (!m_popupExpanded || m_closingPopup) {
+            return;
+        }
+        m_closingPopup = true;
+        if (m_detailsExpanded || m_detailsProgress > 0.001) {
+            m_detailsExpanded = false;
+            m_detailsAnim->stop();
+            m_detailsAnim->setDuration(125);
+            m_detailsAnim->setStartValue(m_detailsProgress);
+            m_detailsAnim->setEndValue(0.0);
+            m_detailsAnim->start();
+        }
+        m_popupAnim->stop();
+        m_popupAnim->setDuration(130);
+        m_popupAnim->setStartValue(qBound(0.0, m_popupProgress, 1.0));
+        m_popupAnim->setEndValue(0.0);
+        m_popupAnim->start();
     }
     update();
-    emit popupVisibilityChanged(m_popupExpanded);
+    if (!m_closingPopup) {
+        emit popupVisibilityChanged(m_popupExpanded);
+    }
 }
 
 void DesktopSearchBar::updateExpandedGeometry() {
@@ -549,20 +705,21 @@ void DesktopSearchBar::updateExpandedGeometry() {
     }
 
     QRect workArea(0, 0, 1920, 1080);
-    int popW = kPopupWidth;
     int startW = kBarWidth;
+    int fullW = kPopupWidth;
     if (screen != nullptr) {
         workArea = screen->availableGeometry();
-        popW = std::min(kPopupWidth, std::max(kBarWidth, workArea.width() - 16));
         startW = std::min(kBarWidth, std::max(kIconSize, workArea.width() - 16));
+        fullW = std::min(kPopupWidth, std::max(startW, workArea.width() - 16));
     }
 
     const int targetPopH = m_popupWidget->desiredPopupHeight();
     const int targetTotalH = kBarHeight + kPopupGap + targetPopH;
-    const qreal progress = qBound(0.0, m_popupProgress, 1.0);
+    const qreal popP = qBound(0.0, m_popupProgress, 1.0);
+    const qreal detP = qBound(0.0, m_detailsProgress, 1.0);
 
-    const int curW = std::max(startW, static_cast<int>(qRound(startW + (popW - startW) * progress)));
-    const int curTotalH = std::max(kBarHeight, static_cast<int>(qRound(kBarHeight + (targetTotalH - kBarHeight) * progress)));
+    const int curW = std::max(startW, startW + static_cast<int>(qRound((fullW - startW) * detP)));
+    const int curTotalH = std::max(kBarHeight, kBarHeight + static_cast<int>(qRound((targetTotalH - kBarHeight) * popP)));
     const int curPopH = std::max(0, curTotalH - kBarHeight - kPopupGap);
 
     int targetWinX = m_iconAnchorPos.x();
@@ -588,14 +745,13 @@ void DesktopSearchBar::updateExpandedGeometry() {
 
     updateSearchInputGeometry();
 
-    const int fullInnerW = std::max(0, popW - kHorizontalShadow);
     const int visibleInnerW = std::max(0, curW - kHorizontalShadow);
     m_popupWidget->setGeometry(kShadowLeft,
                                kShadowTop + kBarCardHeight + kPopupGap,
-                               fullInnerW,
+                               visibleInnerW,
                                targetPopH);
 
-    if (progress < 0.999) {
+    if (curPopH < targetPopH) {
         if (visibleInnerW > 0 && curPopH > 0) {
             m_popupWidget->setMask(QRegion(0, 0, visibleInnerW, curPopH));
         } else {
@@ -730,7 +886,7 @@ void DesktopSearchBar::onSearchTextChanged(const QString& text) {
         }
         ++m_queryGeneration;
         ++m_previewGeneration;
-        m_popupWidget->clearResults();
+        m_closeBarAfterPopup = false;
         setPopupExpanded(false);
         updateSearchInputGeometry();
     } else {
@@ -763,6 +919,23 @@ void DesktopSearchBar::revealResultInExplorer(const search::FileSearchResult& re
         const QString param = QStringLiteral("/select,\"%1\"").arg(nativePath);
         const std::wstring wParam = param.toStdWString();
         ::ShellExecuteW(nullptr, L"open", L"explorer.exe", wParam.c_str(), nullptr, SW_SHOWNORMAL);
+    }
+}
+
+void DesktopSearchBar::copyResultFileToClipboard(const search::FileSearchResult& result) {
+    if (result.path.isEmpty()) {
+        return;
+    }
+    const QString nativePath = QDir::toNativeSeparators(result.path);
+    if (!QFileInfo::exists(nativePath)) {
+        return;
+    }
+    const HWND owner = testAttribute(Qt::WA_WState_Created) ? reinterpret_cast<HWND>(winId()) : nullptr;
+    if (platform::windows::DesktopIntegration::copyFileOrFolderToClipboard(nativePath, owner)) {
+        if (m_popupWidget != nullptr) {
+            m_popupWidget->showFileCopiedFeedback();
+        }
+        emit fileCopiedToClipboard(nativePath);
     }
 }
 
@@ -872,16 +1045,19 @@ void DesktopSearchBar::paintEvent(QPaintEvent* /*event*/) {
     const qreal seamX = cRect.left() + pinkW;
 
     // 2. White search bar + optional results workspace cleanly attached to the right edge of the pink Lumen icon
-    if (!m_popupExpanded) {
+    const qreal dividerY = cRect.top() + kBarCardHeight;
+    const qreal popSpan = qMax(0.0, cRect.bottom() - dividerY);
+    if (!m_popupExpanded || popSpan <= 3.0) {
         if (cRect.width() > pinkW + 2.0) {
             const qreal fillLeft = qMax(cRect.left() + 4.0, seamX - 6.0);
+            const qreal rightEdgeR = qMin(radius, cRect.bottom() - cRect.top());
             QPainterPath fillPath;
             fillPath.moveTo(fillLeft, cRect.top());
             fillPath.lineTo(cRect.right() - radius, cRect.top());
             fillPath.arcTo(QRectF(cRect.right() - 2.0 * radius, cRect.top(), 2.0 * radius, 2.0 * radius), 90.0, -90.0);
-            fillPath.lineTo(cRect.right(), cRect.bottom() - radius);
-            fillPath.arcTo(QRectF(cRect.right() - 2.0 * radius, cRect.bottom() - 2.0 * radius, 2.0 * radius, 2.0 * radius), 0.0, -90.0);
-            fillPath.lineTo(fillLeft, cRect.bottom());
+            fillPath.lineTo(cRect.right(), dividerY - rightEdgeR * 0.5);
+            fillPath.arcTo(QRectF(cRect.right() - 2.0 * radius, dividerY - 2.0 * radius, 2.0 * radius, 2.0 * radius), 0.0, -90.0);
+            fillPath.lineTo(fillLeft, dividerY);
             fillPath.closeSubpath();
 
             painter.setPen(Qt::NoPen);
@@ -893,11 +1069,11 @@ void DesktopSearchBar::paintEvent(QPaintEvent* /*event*/) {
             whiteOutline.moveTo(seamX, cRect.top());
             whiteOutline.lineTo(cRect.right() - radius, cRect.top());
             whiteOutline.arcTo(QRectF(cRect.right() - 2.0 * radius, cRect.top(), 2.0 * radius, 2.0 * radius), 90.0, -90.0);
-            whiteOutline.lineTo(cRect.right(), cRect.bottom() - radius);
-            whiteOutline.arcTo(QRectF(cRect.right() - 2.0 * radius, cRect.bottom() - 2.0 * radius, 2.0 * radius, 2.0 * radius), 0.0, -90.0);
-            whiteOutline.lineTo(seamX, cRect.bottom());
+            whiteOutline.lineTo(cRect.right(), dividerY - radius);
+            whiteOutline.arcTo(QRectF(cRect.right() - 2.0 * radius, dividerY - 2.0 * radius, 2.0 * radius, 2.0 * radius), 0.0, -90.0);
+            whiteOutline.lineTo(seamX, dividerY);
 
-            if (searchFocused) {
+            if (searchFocused && !m_popupExpanded) {
                 painter.save();
                 painter.setClipRect(QRectF(seamX, 0.0, width() - seamX, height()));
                 QPen glowPen(QColor(236, 22, 128, 34), 4.0);
@@ -914,19 +1090,22 @@ void DesktopSearchBar::paintEvent(QPaintEvent* /*event*/) {
             painter.drawPath(whiteOutline);
         }
 
-        // Paint pure pink Lumen badge cleanly on top with flat right edge attached to the white search bar
-        BrandingIcon::paintLumenMark(&painter, pinkRect, radius, 0.0, 0.0, radius);
+        // Paint pure pink Lumen badge cleanly on top with smooth right-corner morph during slide in/out
+        const qreal rightCapR = (cRect.width() <= pinkW + 2.0)
+                                    ? radius
+                                    : qMax(0.0, radius * (1.0 - qMin(1.0, (cRect.width() - pinkW) / 14.0)));
+        BrandingIcon::paintLumenMark(&painter, pinkRect, radius, rightCapR, rightCapR, radius);
     } else {
-        const qreal dividerY = cRect.top() + kBarCardHeight;
+        const qreal bottomR = qMin(radius, popSpan * 0.5);
 
         QPainterPath whiteFillPath;
         whiteFillPath.moveTo(seamX - 4.0, cRect.top());
         whiteFillPath.lineTo(cRect.right() - radius, cRect.top());
         whiteFillPath.arcTo(QRectF(cRect.right() - 2.0 * radius, cRect.top(), 2.0 * radius, 2.0 * radius), 90.0, -90.0);
-        whiteFillPath.lineTo(cRect.right(), cRect.bottom() - radius);
-        whiteFillPath.arcTo(QRectF(cRect.right() - 2.0 * radius, cRect.bottom() - 2.0 * radius, 2.0 * radius, 2.0 * radius), 0.0, -90.0);
-        whiteFillPath.lineTo(cRect.left() + radius, cRect.bottom());
-        whiteFillPath.arcTo(QRectF(cRect.left(), cRect.bottom() - 2.0 * radius, 2.0 * radius, 2.0 * radius), 270.0, -90.0);
+        whiteFillPath.lineTo(cRect.right(), cRect.bottom() - bottomR);
+        whiteFillPath.arcTo(QRectF(cRect.right() - 2.0 * bottomR, cRect.bottom() - 2.0 * bottomR, 2.0 * bottomR, 2.0 * bottomR), 0.0, -90.0);
+        whiteFillPath.lineTo(cRect.left() + bottomR, cRect.bottom());
+        whiteFillPath.arcTo(QRectF(cRect.left(), cRect.bottom() - 2.0 * bottomR, 2.0 * bottomR, 2.0 * bottomR), 270.0, -90.0);
         whiteFillPath.lineTo(cRect.left(), dividerY - 4.0);
         whiteFillPath.lineTo(seamX - 4.0, dividerY - 4.0);
         whiteFillPath.closeSubpath();
@@ -939,10 +1118,10 @@ void DesktopSearchBar::paintEvent(QPaintEvent* /*event*/) {
         whiteOutline.moveTo(seamX, cRect.top());
         whiteOutline.lineTo(cRect.right() - radius, cRect.top());
         whiteOutline.arcTo(QRectF(cRect.right() - 2.0 * radius, cRect.top(), 2.0 * radius, 2.0 * radius), 90.0, -90.0);
-        whiteOutline.lineTo(cRect.right(), cRect.bottom() - radius);
-        whiteOutline.arcTo(QRectF(cRect.right() - 2.0 * radius, cRect.bottom() - 2.0 * radius, 2.0 * radius, 2.0 * radius), 0.0, -90.0);
-        whiteOutline.lineTo(cRect.left() + radius, cRect.bottom());
-        whiteOutline.arcTo(QRectF(cRect.left(), cRect.bottom() - 2.0 * radius, 2.0 * radius, 2.0 * radius), 270.0, -90.0);
+        whiteOutline.lineTo(cRect.right(), cRect.bottom() - bottomR);
+        whiteOutline.arcTo(QRectF(cRect.right() - 2.0 * bottomR, cRect.bottom() - 2.0 * bottomR, 2.0 * bottomR, 2.0 * bottomR), 0.0, -90.0);
+        whiteOutline.lineTo(cRect.left() + bottomR, cRect.bottom());
+        whiteOutline.arcTo(QRectF(cRect.left(), cRect.bottom() - 2.0 * bottomR, 2.0 * bottomR, 2.0 * bottomR), 270.0, -90.0);
         whiteOutline.lineTo(cRect.left(), dividerY);
 
         painter.setPen(QPen(cardBorder, 1.0));
@@ -970,8 +1149,7 @@ void DesktopSearchBar::paintEvent(QPaintEvent* /*event*/) {
             painter.drawLine(QPointF(c.x() + d, c.y() - d), QPointF(c.x() - d, c.y() + d));
         }
 
-        if (m_popupExpanded) {
-            const qreal dividerY = cRect.top() + kBarCardHeight;
+        if (m_popupExpanded && popSpan > 3.0) {
             // Neutral #EFEFEF divider across top search row starting at the white search section
             painter.setPen(QPen(theme.borderSubtle, 1.0));
             painter.drawLine(QPointF(seamX, dividerY),
@@ -1103,11 +1281,14 @@ void DesktopSearchBar::mouseReleaseEvent(QMouseEvent* event) {
             core::SettingsManager::instance().setDesktopBarPosition(m_iconAnchorPos, true);
             emit positionPersisted(m_iconAnchorPos);
         } else {
-            if (!m_barExpanded) {
+            if (!m_barExpanded || m_closingBar) {
                 activateAndFocusSearch(true);
             } else if (iconTileRect().contains(event->position())) {
                 collapsePopupAndDeactivate(true);
             } else {
+                if (m_popupExpanded && m_popupWidget && m_popupWidget->hasSelection()) {
+                    m_popupWidget->clearResultSelection();
+                }
                 m_searchEdit->setFocus(Qt::MouseFocusReason);
             }
         }
@@ -1134,6 +1315,9 @@ bool DesktopSearchBar::eventFilter(QObject* watched, QEvent* event) {
             platform::windows::DesktopIntegration::activateForSearchInput(hwnd);
             if (!m_searchEdit->text().trimmed().isEmpty()) {
                 setPopupExpanded(true);
+            }
+            if (m_popupExpanded && m_popupWidget && m_popupWidget->hasSelection()) {
+                m_popupWidget->clearResultSelection();
             }
             update();
         } else if (event->type() == QEvent::FocusIn) {
@@ -1182,7 +1366,9 @@ bool DesktopSearchBar::eventFilter(QObject* watched, QEvent* event) {
                                 return true;
                             }
                         }
-                        m_popupWidget->activateSelected();
+                        if (m_popupWidget->activateSelected()) {
+                            return true;
+                        }
                         return true;
                     }
                     break;
@@ -1212,9 +1398,13 @@ bool DesktopSearchBar::eventFilter(QObject* watched, QEvent* event) {
                     break;
                 case Qt::Key_C:
                     if (ctrl && m_popupExpanded && m_popupWidget->resultCount() > 0) {
-                        if (shift || !m_searchEdit->hasSelectedText()) {
-                            if (const auto* sel = m_popupWidget->selectedResult()) {
+                        if (const auto* sel = m_popupWidget->selectedResult()) {
+                            if (shift) {
                                 copyResultPathToClipboard(*sel);
+                                return true;
+                            }
+                            if (!m_searchEdit->hasSelectedText()) {
+                                copyResultFileToClipboard(*sel);
                                 return true;
                             }
                         }
@@ -1262,7 +1452,7 @@ bool DesktopSearchBar::nativeEvent(const QByteArray& eventType, void* message, q
 
         if (msg->message == WM_HOTKEY &&
             static_cast<int>(msg->wParam) == platform::windows::DesktopIntegration::kDefaultHotkeyId) {
-            if (m_barExpanded) {
+            if (m_barExpanded && !m_closingBar) {
                 collapsePopupAndDeactivate(true);
             } else {
                 activateAndFocusSearch(true);
@@ -1273,7 +1463,8 @@ bool DesktopSearchBar::nativeEvent(const QByteArray& eventType, void* message, q
             return true;
         }
 
-        if (msg->message == WM_WINDOWPOSCHANGING && !m_alwaysOnTop && !m_isSearchActive && !m_barExpanded && !m_keepAboveShellTemp) {
+        if (msg->message == WM_WINDOWPOSCHANGING && !m_alwaysOnTop && !m_isSearchActive && !m_barExpanded &&
+            !m_closingBar && !m_closingPopup && !m_keepAboveShellTemp) {
             auto* wp = reinterpret_cast<WINDOWPOS*>(msg->lParam);
             if (wp != nullptr && (wp->flags & SWP_NOZORDER) == 0) {
                 wp->hwndInsertAfter = HWND_BOTTOM;

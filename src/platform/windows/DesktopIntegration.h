@@ -64,6 +64,9 @@ public:
 
     // Queries accurate Windows kernel process memory and CPU time counters.
     static ProcessResourceMetrics queryCurrentProcessMetrics();
+
+    // Copies a file or folder path onto the Windows Clipboard as CF_HDROP (explorer pasteable copy).
+    static bool copyFileOrFolderToClipboard(const QString& nativePath, HWND ownerHwnd = nullptr);
 };
 
 } // namespace lumen::platform::windows

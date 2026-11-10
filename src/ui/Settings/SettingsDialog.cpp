@@ -147,7 +147,7 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     mainLayout->addWidget(createSectionHeader(QStringLiteral("Search & Indexing"), this));
 
     m_enableContentCheck = new QCheckBox(
-        QStringLiteral("Index text, code, spreadsheets & media metadata"), this);
+        QStringLiteral("Index text, code, spreadsheets && media metadata"), this);
     m_enableContentCheck->setFont(ThemeTokens::makeFont(13, QFont::Normal));
     mainLayout->addWidget(m_enableContentCheck);
 
@@ -163,6 +163,8 @@ SettingsDialog::SettingsDialog(QWidget* parent)
 
     m_watchedFoldersList = new QListWidget(this);
     m_watchedFoldersList->setFixedHeight(88);
+    m_watchedFoldersList->setTextElideMode(Qt::ElideMiddle);
+    m_watchedFoldersList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_watchedFoldersList->setFont(ThemeTokens::makeFont(12, QFont::Normal));
     mainLayout->addWidget(m_watchedFoldersList);
 
@@ -293,7 +295,13 @@ void SettingsDialog::applyThemeStyles() {
         "QCheckBox { spacing: 8px; color: %2; padding: 2px 0px; }"
         "QListWidget { background-color: %6; border: 1px solid %7; border-radius: 6px; padding: 4px; color: %2; outline: none; }"
         "QListWidget::item { padding: 3px 6px; border-radius: 4px; }"
-        "QListWidget::item:selected { background-color: %10; color: %2; }")
+        "QListWidget::item:selected { background-color: %10; color: %2; }"
+        "QScrollBar:vertical { width: 13px; background: #EFEFF4; margin: 2px; border-radius: 6px; border: none; }"
+        "QScrollBar::handle:vertical { background: #B0B5C3; border-radius: 5px; min-height: 28px; margin: 1px; }"
+        "QScrollBar::handle:vertical:hover { background: %9; }"
+        "QScrollBar::handle:vertical:pressed { background: #C8106C; }"
+        "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; background: transparent; }")
         .arg(QStringLiteral("#FFFFFF"),            // %1 Pure White dialog surface
              theme.textPrimary.name(),            // %2 Dark text
              theme.textSecondary.name(),          // %3 Muted gray (#6E6E6E)

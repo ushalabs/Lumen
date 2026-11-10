@@ -5,7 +5,9 @@
 #include <QKeySequence>
 #include <QStringList>
 
+#include <cstring>
 #include <psapi.h>
+#include <shlobj.h>
 
 namespace lumen::platform::windows {
 
@@ -341,6 +343,79 @@ ProcessResourceMetrics DesktopIntegration::queryCurrentProcessMetrics() {
     }
 
     return metrics;
+}
+
+bool DesktopIntegration::copyFileOrFolderToClipboard(const QString& nativePath, HWND ownerHwnd) {
+    if (nativePath.isEmpty()) {
+        return false;
+    }
+
+    const std::wstring wPath = nativePath.toStdWString();
+    const SIZE_T dropSize = sizeof(DROPFILES) + (wPath.size() + 2) * sizeof(wchar_t);
+    HGLOBAL hDrop = GlobalAlloc(GHND | GMEM_SHARE, dropSize);
+    if (hDrop == nullptr) {
+        return false;
+    }
+
+    auto* df = static_cast<DROPFILES*>(GlobalLock(hDrop));
+    if (df == nullptr) {
+        GlobalFree(hDrop);
+        return false;
+    }
+    df->pFiles = sizeof(DROPFILES);
+    df->fWide = TRUE;
+    wchar_t* dst = reinterpret_cast<wchar_t*>(reinterpret_cast<BYTE*>(df) + sizeof(DROPFILES));
+    std::memcpy(dst, wPath.c_str(), wPath.size() * sizeof(wchar_t));
+    dst[wPath.size()] = L'\0';
+    dst[wPath.size() + 1] = L'\0';
+    GlobalUnlock(hDrop);
+
+    HGLOBAL hEffect = GlobalAlloc(GHND | GMEM_SHARE, sizeof(DWORD));
+    if (hEffect != nullptr) {
+        if (auto* pEffect = static_cast<DWORD*>(GlobalLock(hEffect))) {
+            *pEffect = DROPEFFECT_COPY;
+            GlobalUnlock(hEffect);
+        } else {
+            GlobalFree(hEffect);
+            hEffect = nullptr;
+        }
+    }
+
+    bool opened = false;
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        if (OpenClipboard(ownerHwnd)) {
+            opened = true;
+            break;
+        }
+        Sleep(10);
+    }
+    if (!opened) {
+        GlobalFree(hDrop);
+        if (hEffect != nullptr) {
+            GlobalFree(hEffect);
+        }
+        return false;
+    }
+
+    EmptyClipboard();
+    if (SetClipboardData(CF_HDROP, hDrop) == nullptr) {
+        CloseClipboard();
+        GlobalFree(hDrop);
+        if (hEffect != nullptr) {
+            GlobalFree(hEffect);
+        }
+        return false;
+    }
+
+    if (hEffect != nullptr) {
+        const UINT cfDropEffect = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
+        if (cfDropEffect == 0 || SetClipboardData(cfDropEffect, hEffect) == nullptr) {
+            GlobalFree(hEffect);
+        }
+    }
+
+    CloseClipboard();
+    return true;
 }
 
 } // namespace lumen::platform::windows
