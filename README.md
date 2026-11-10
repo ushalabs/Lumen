@@ -1,8 +1,8 @@
-<div align="center">
-
+<h1 align="center">
 <img src="assets/branding/lumen_logo.svg" alt="Lumen Logo" width="84" height="84" />
-
-# Lumen
+<br />
+  Lumen
+  </h1>
 
 ### Lightweight Offline Intelligent Search for Windows
 
