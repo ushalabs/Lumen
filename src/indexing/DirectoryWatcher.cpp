@@ -4,6 +4,9 @@
 
 #include <QDir>
 #include <QMetaType>
+#include <algorithm>
+#include <chrono>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -11,6 +14,7 @@ namespace lumen::indexing {
 
 namespace {
 constexpr DWORD kWatchBufferBytes = 64 * 1024;
+constexpr auto kRenamePairGraceWindow = std::chrono::milliseconds(50);
 constexpr DWORD kNotifyFilter = FILE_NOTIFY_CHANGE_FILE_NAME |
                                 FILE_NOTIFY_CHANGE_DIR_NAME |
                                 FILE_NOTIFY_CHANGE_SIZE |
@@ -21,8 +25,10 @@ struct WatchedRootContext {
     HANDLE dirHandle = INVALID_HANDLE_VALUE;
     HANDLE ioEvent = nullptr;
     OVERLAPPED overlapped{};
-     alignas(DWORD) BYTE buffer[kWatchBufferBytes]{};
+    alignas(DWORD) BYTE buffer[kWatchBufferBytes]{};
     bool pendingIo = false;
+    QString pendingRenameOldPath;
+    std::chrono::steady_clock::time_point pendingRenameDeadline{};
 
     ~WatchedRootContext() {
         if (dirHandle != INVALID_HANDLE_VALUE && dirHandle != nullptr) {
@@ -36,6 +42,17 @@ struct WatchedRootContext {
         }
     }
 };
+
+void flushExpiredRenameAsRemoved(WatchedRootContext* ctx, QVector<FileChangeEvent>* outBatch) {
+    if (ctx == nullptr || ctx->pendingRenameOldPath.isEmpty()) {
+        return;
+    }
+    FileChangeEvent ev;
+    ev.action = FileChangeAction::Removed;
+    ev.path = ctx->pendingRenameOldPath;
+    ctx->pendingRenameOldPath.clear();
+    outBatch->append(std::move(ev));
+}
 
 bool issueAsyncRead(WatchedRootContext* ctx) {
     if (ctx == nullptr || ctx->dirHandle == INVALID_HANDLE_VALUE) {
@@ -173,14 +190,43 @@ void DirectoryWatcher::watcherThreadMain(QStringList roots, QSet<QString> ignore
     }
 
     while (m_running.load(std::memory_order_relaxed)) {
+        DWORD waitTimeoutMs = INFINITE;
+        const auto now = std::chrono::steady_clock::now();
+        for (const auto& ctxPtr : contexts) {
+            if (!ctxPtr->pendingRenameOldPath.isEmpty()) {
+                if (now >= ctxPtr->pendingRenameDeadline) {
+                    waitTimeoutMs = 0;
+                    break;
+                }
+                const auto remMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    ctxPtr->pendingRenameDeadline - now).count();
+                const DWORD clamped = static_cast<DWORD>(std::clamp<long long>(remMs, 1, 100));
+                waitTimeoutMs = (waitTimeoutMs == INFINITE) ? clamped : std::min(waitTimeoutMs, clamped);
+            }
+        }
+
         const DWORD waitRc = WaitForMultipleObjects(
             static_cast<DWORD>(waitHandles.size()),
             waitHandles.data(),
             FALSE,
-            INFINITE);
+            waitTimeoutMs);
 
         if (waitRc == WAIT_OBJECT_0 || !m_running.load(std::memory_order_relaxed)) {
             break; // Stop event signaled
+        }
+
+        if (waitRc == WAIT_TIMEOUT) {
+            const auto checkTime = std::chrono::steady_clock::now();
+            for (const auto& ctxPtr : contexts) {
+                if (!ctxPtr->pendingRenameOldPath.isEmpty() && checkTime >= ctxPtr->pendingRenameDeadline) {
+                    QVector<FileChangeEvent> expiredBatch;
+                    flushExpiredRenameAsRemoved(ctxPtr.get(), &expiredBatch);
+                    if (!expiredBatch.isEmpty()) {
+                        emit fileChangesDetected(expiredBatch);
+                    }
+                }
+            }
+            continue;
         }
 
         if (waitRc < WAIT_OBJECT_0 + 1 || waitRc >= WAIT_OBJECT_0 + waitHandles.size()) {
@@ -192,9 +238,13 @@ void DirectoryWatcher::watcherThreadMain(QStringList roots, QSet<QString> ignore
 
         DWORD bytesTransferred = 0;
         const BOOL overOk = GetOverlappedResult(ctx->dirHandle, &ctx->overlapped, &bytesTransferred, FALSE);
+        const DWORD lastErr = overOk ? ERROR_SUCCESS : GetLastError();
         if (overOk && bytesTransferred > 0) {
             QVector<FileChangeEvent> batch;
-            QString pendingRenameOldPath;
+            const auto eventNow = std::chrono::steady_clock::now();
+            if (!ctx->pendingRenameOldPath.isEmpty() && eventNow >= ctx->pendingRenameDeadline) {
+                flushExpiredRenameAsRemoved(ctx, &batch);
+            }
 
             const BYTE* cursor = ctx->buffer;
             for (;;) {
@@ -205,7 +255,13 @@ void DirectoryWatcher::watcherThreadMain(QStringList roots, QSet<QString> ignore
                 if (!containsIgnoredSegment(relPath, ignoredLower)) {
                     const QString fullPath = ctx->rootPath + QLatin1Char('\\') + relPath;
                     switch (info->Action) {
-                        case FILE_ACTION_ADDED:
+                        case FILE_ACTION_ADDED: {
+                            FileChangeEvent ev;
+                            ev.action = FileChangeAction::AddedOrModified;
+                            ev.path = fullPath;
+                            batch.append(std::move(ev));
+                            break;
+                        }
                         case FILE_ACTION_MODIFIED: {
                             FileChangeEvent ev;
                             ev.action = FileChangeAction::AddedOrModified;
@@ -221,16 +277,20 @@ void DirectoryWatcher::watcherThreadMain(QStringList roots, QSet<QString> ignore
                             break;
                         }
                         case FILE_ACTION_RENAMED_OLD_NAME: {
-                            pendingRenameOldPath = fullPath;
+                            if (!ctx->pendingRenameOldPath.isEmpty()) {
+                                flushExpiredRenameAsRemoved(ctx, &batch);
+                            }
+                            ctx->pendingRenameOldPath = fullPath;
+                            ctx->pendingRenameDeadline = std::chrono::steady_clock::now() + kRenamePairGraceWindow;
                             break;
                         }
                         case FILE_ACTION_RENAMED_NEW_NAME: {
                             FileChangeEvent ev;
-                            if (!pendingRenameOldPath.isEmpty()) {
+                            if (!ctx->pendingRenameOldPath.isEmpty()) {
                                 ev.action = FileChangeAction::Renamed;
-                                ev.oldPath = pendingRenameOldPath;
+                                ev.oldPath = ctx->pendingRenameOldPath;
                                 ev.path = fullPath;
-                                pendingRenameOldPath.clear();
+                                ctx->pendingRenameOldPath.clear();
                             } else {
                                 ev.action = FileChangeAction::AddedOrModified;
                                 ev.path = fullPath;
@@ -249,16 +309,21 @@ void DirectoryWatcher::watcherThreadMain(QStringList roots, QSet<QString> ignore
                 cursor += info->NextEntryOffset;
             }
 
-            if (!pendingRenameOldPath.isEmpty()) {
-                FileChangeEvent ev;
-                ev.action = FileChangeAction::Removed;
-                ev.path = pendingRenameOldPath;
-                batch.append(std::move(ev));
-            }
-
             if (!batch.isEmpty()) {
                 emit fileChangesDetected(batch);
             }
+        } else if (m_running.load(std::memory_order_relaxed) &&
+                   ((overOk && bytesTransferred == 0) || lastErr == ERROR_NOTIFY_ENUM_DIR)) {
+            QVector<FileChangeEvent> overflowFlush;
+            flushExpiredRenameAsRemoved(ctx, &overflowFlush);
+            if (!overflowFlush.isEmpty()) {
+                emit fileChangesDetected(overflowFlush);
+            }
+            core::Logger::warning(
+                QStringLiteral("Watcher"),
+                QStringLiteral("Directory change buffer overflowed for %1; requesting targeted rescan.")
+                    .arg(ctx->rootPath));
+            emit watcherOverflowRescanNeeded(ctx->rootPath);
         }
 
         if (!issueAsyncRead(ctx)) {

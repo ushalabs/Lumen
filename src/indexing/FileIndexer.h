@@ -8,6 +8,7 @@
 #include <QStringList>
 #include <QVector>
 #include <atomic>
+#include <mutex>
 #include <thread>
 
 namespace lumen::indexing {
@@ -87,14 +88,22 @@ signals:
 
 private slots:
     void onWatcherEvents(const QVector<lumen::indexing::FileChangeEvent>& events);
+    void onWatcherOverflowRescan(const QString& rootDirectory);
 
 private:
+    void reconcileDirectorySubtree(const QString& dirPath,
+                                   qint64 maxDocumentBytes,
+                                   bool* outHasEligibleDocChange);
+
     DirectoryWatcher m_watcher;
     std::thread m_workerThread;
+    std::recursive_mutex m_incrementalMutex;
     std::atomic_bool m_cancelRequested{false};
     std::atomic_bool m_paused{false};
     std::atomic_bool m_scanning{false};
     QSet<QString> m_ignoredLower;
+    bool m_incrementalContentEnabled = true;
+    qint64 m_incrementalMaxDocBytes = kDefaultMaxDocumentBytes;
 };
 
 } // namespace lumen::indexing

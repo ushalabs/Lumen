@@ -2,7 +2,10 @@ param(
     [string]$Version = "",
     [string]$OutputDir = "",
     [string]$NsisCompiler = "",
-    [string]$QtBinDir = ""
+    [string]$QtBinDir = "",
+    [string]$LumenExePath = "",
+    [string]$CertPfxPath = $env:LUMEN_SIGNING_PFX,
+    [string]$TimestampUrl = "http://timestamp.digicert.com"
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,7 +17,7 @@ if (-not $Version) {
     if ($verMatch.Success) {
         $Version = $verMatch.Groups[1].Value
     } else {
-        $Version = "0.5.0"
+        $Version = "0.5.1"
     }
 }
 
@@ -24,17 +27,23 @@ if (-not $OutputDir) {
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 $OutputDir = (Resolve-Path $OutputDir).Path
 
-# Locate NSIS compiler
+# Locate NSIS compiler without machine-specific paths
 if (-not $NsisCompiler) {
-    $nsisCandidates = @(
-        "c:\Users\HP\Desktop\Projects\Downshift\.tools\windows\nsis\nsis-3.12\makensis.exe",
+    $nsisCandidates = @()
+    $cmdNsis = Get-Command "makensis.exe" -ErrorAction SilentlyContinue
+    if ($cmdNsis) {
+        $nsisCandidates += $cmdNsis.Source
+    }
+    if ($env:MAKENSIS) {
+        $nsisCandidates += $env:MAKENSIS
+    }
+    if ($env:NSIS_HOME) {
+        $nsisCandidates += (Join-Path $env:NSIS_HOME "makensis.exe")
+    }
+    $nsisCandidates += @(
         (Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe"),
         (Join-Path $env:ProgramFiles "NSIS\makensis.exe")
     )
-    $cmdNsis = Get-Command "makensis.exe" -ErrorAction SilentlyContinue
-    if ($cmdNsis) {
-        $nsisCandidates = @($cmdNsis.Source) + $nsisCandidates
-    }
     foreach ($candidate in $nsisCandidates) {
         if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
             $NsisCompiler = $candidate
@@ -84,7 +93,7 @@ if (-not (Test-Path -LiteralPath $crtDir -PathType Container)) {
     throw "Microsoft.VC143.CRT directory not found at $crtDir."
 }
 
-$lumenExe = Join-Path $projectRoot "build\Lumen.exe"
+$lumenExe = if ($LumenExePath) { $LumenExePath } else { Join-Path $projectRoot "build\Lumen.exe" }
 if (-not (Test-Path -LiteralPath $lumenExe -PathType Leaf)) {
     throw "Lumen.exe not found at $lumenExe. Build Release first."
 }
@@ -123,10 +132,20 @@ foreach ($requiredDll in @("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.d
     }
 }
 
-# 4. Copy ONNX Runtime & Bundled Model Assets
-Write-Host "==> Bundling ONNX Runtime & MiniLM-L6-v2 embeddings model..."
+# 4. Copy ONNX Runtime, PDFium & Bundled Model Assets
+Write-Host "==> Bundling ONNX Runtime, PDFium & MiniLM-L6-v2 embeddings model..."
 $onnxDll = Join-Path $projectRoot "third_party\onnxruntime\lib\onnxruntime.dll"
 Copy-Item -LiteralPath $onnxDll -Destination (Join-Path $stageDir "onnxruntime.dll") -Force
+
+$pdfiumDll = Join-Path $projectRoot "third_party\pdfium\bin\pdfium.dll"
+if (-not (Test-Path -LiteralPath $pdfiumDll -PathType Leaf)) {
+    throw "Required PDFium runtime missing at $pdfiumDll"
+}
+Copy-Item -LiteralPath $pdfiumDll -Destination (Join-Path $stageDir "pdfium.dll") -Force
+$pdfiumLicense = Join-Path $projectRoot "third_party\pdfium\licenses\pdfium.txt"
+if (Test-Path -LiteralPath $pdfiumLicense -PathType Leaf) {
+    Copy-Item -LiteralPath $pdfiumLicense -Destination (Join-Path $stageDir "LICENSE.pdfium.txt") -Force
+}
 
 $modelTargetDir = Join-Path $stageDir "models\all-MiniLM-L6-v2"
 New-Item -ItemType Directory -Force -Path $modelTargetDir | Out-Null
@@ -134,6 +153,28 @@ Copy-Item (Join-Path $projectRoot "assets\models\all-MiniLM-L6-v2\*") $modelTarg
 
 Copy-Item -LiteralPath (Join-Path $projectRoot "LICENSE") -Destination (Join-Path $stageDir "LICENSE") -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination (Join-Path $stageDir "README.md") -Force
+
+$signtool = $null
+$certPassword = $env:LUMEN_SIGNING_PASSWORD
+if ($CertPfxPath) {
+    if (-not (Test-Path -LiteralPath $CertPfxPath -PathType Leaf)) {
+        throw "Signing certificate PFX not found at $CertPfxPath"
+    }
+    if (-not $certPassword) {
+        throw "Signing password environment variable LUMEN_SIGNING_PASSWORD is not set."
+    }
+    $signtoolCmd = Get-Command "signtool.exe" -ErrorAction SilentlyContinue
+    $signtool = if ($signtoolCmd) { $signtoolCmd.Source } else {
+        Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+    }
+    if (-not $signtool) {
+        throw "signtool.exe not found; cannot sign artifacts."
+    }
+    Write-Host "==> Authenticode signing staged Lumen.exe..."
+    & $signtool sign /fd SHA256 /tr $TimestampUrl /td SHA256 /f $CertPfxPath /p $certPassword (Join-Path $stageDir "Lumen.exe")
+    if ($LASTEXITCODE -ne 0) { throw "signtool failed on staged Lumen.exe" }
+}
 
 # 5. Generate NSIS File Lists
 Write-Host "==> Generating installer file manifests..."
@@ -187,6 +228,12 @@ $nsiScript = Join-Path $projectRoot "packaging\Lumen.nsi"
 
 if ($LASTEXITCODE -ne 0) {
     throw "NSIS compilation failed with code $LASTEXITCODE"
+}
+
+if ($CertPfxPath -and $signtool) {
+    Write-Host "==> Authenticode signing Setup executable..."
+    & $signtool sign /fd SHA256 /tr $TimestampUrl /td SHA256 /f $CertPfxPath /p $certPassword $setupExe
+    if ($LASTEXITCODE -ne 0) { throw "signtool failed on $setupExe" }
 }
 
 # 7. Create Portable ZIP Distribution

@@ -596,6 +596,34 @@ QHash<QString, ExistingFileMeta> DatabaseManager::queryExistingFilesUnderRoot(co
     return result;
 }
 
+std::optional<ExistingFileMeta> DatabaseManager::queryFileMetaByPath(const QString& path) const {
+    QMutexLocker locker(&m_writeMutex);
+    if (m_db == nullptr) {
+        return std::nullopt;
+    }
+
+    const QString cleanNative = QDir::toNativeSeparators(QDir::cleanPath(path));
+    const QByteArray pathUtf8 = cleanNative.toUtf8();
+
+    {
+        ScopedStmt stmt;
+        const char* sql = "SELECT id, size, mtime, is_dir FROM files WHERE path = ?1 LIMIT 1;";
+        if (sqlite3_prepare_v2(m_db, sql, -1, stmt.receive(), nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt.get(), 1, pathUtf8.constData(), pathUtf8.size(), SQLITE_STATIC);
+            if (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+                ExistingFileMeta meta;
+                meta.id = sqlite3_column_int64(stmt.get(), 0);
+                meta.size = sqlite3_column_int64(stmt.get(), 1);
+                meta.mtime = sqlite3_column_int64(stmt.get(), 2);
+                meta.isDir = (sqlite3_column_int(stmt.get(), 3) != 0);
+                return meta;
+            }
+        }
+    }
+
+    return std::nullopt;
+}
+
 bool DatabaseManager::upsertFileBatch(const QVector<FileRecord>& records,
                                       const std::atomic_bool* cancelFlag) {
     if (records.isEmpty()) {
@@ -752,7 +780,16 @@ bool DatabaseManager::removeFileByPath(const QString& path) {
 bool DatabaseManager::renamePath(const QString& oldPath,
                                  const QString& newPath,
                                  const QString& newName,
-                                 const QString& newExt) {
+                                 const QString& newExt,
+                                 int* outAffectedRows,
+                                 bool* outSourceWasDir) {
+    if (outAffectedRows != nullptr) {
+        *outAffectedRows = 0;
+    }
+    if (outSourceWasDir != nullptr) {
+        *outSourceWasDir = false;
+    }
+
     QMutexLocker locker(&m_writeMutex);
     if (m_db == nullptr) {
         return false;
@@ -765,6 +802,98 @@ bool DatabaseManager::renamePath(const QString& oldPath,
         return false;
     }
 
+    qint64 sourceId = 0;
+    bool sourceIsDir = false;
+    QString matchedOldNative = oldNative;
+    {
+        ScopedStmt findStmt;
+        const char* findSql = "SELECT id, is_dir, path FROM files WHERE path = ?1 LIMIT 1;";
+        if (sqlite3_prepare_v2(m_db, findSql, -1, findStmt.receive(), nullptr) == SQLITE_OK) {
+            const QByteArray oldUtf8 = oldNative.toUtf8();
+            sqlite3_bind_text(findStmt.get(), 1, oldUtf8.constData(), oldUtf8.size(), SQLITE_STATIC);
+            if (sqlite3_step(findStmt.get()) == SQLITE_ROW) {
+                sourceId = sqlite3_column_int64(findStmt.get(), 0);
+                sourceIsDir = (sqlite3_column_int(findStmt.get(), 1) != 0);
+            }
+        }
+        // Fallback lookup for NTFS case-insensitive path casing differences
+        if (sourceId == 0) {
+            ScopedStmt nocaseStmt;
+            const char* nocaseSql = "SELECT id, is_dir, path FROM files WHERE path = ?1 COLLATE NOCASE LIMIT 1;";
+            if (sqlite3_prepare_v2(m_db, nocaseSql, -1, nocaseStmt.receive(), nullptr) == SQLITE_OK) {
+                const QByteArray oldUtf8 = oldNative.toUtf8();
+                sqlite3_bind_text(nocaseStmt.get(), 1, oldUtf8.constData(), oldUtf8.size(), SQLITE_STATIC);
+                if (sqlite3_step(nocaseStmt.get()) == SQLITE_ROW) {
+                    sourceId = sqlite3_column_int64(nocaseStmt.get(), 0);
+                    sourceIsDir = (sqlite3_column_int(nocaseStmt.get(), 1) != 0);
+                    if (const char* stored = reinterpret_cast<const char*>(sqlite3_column_text(nocaseStmt.get(), 2))) {
+                        matchedOldNative = QString::fromUtf8(stored);
+                    }
+                }
+            }
+        }
+    }
+
+    if (outSourceWasDir != nullptr) {
+        *outSourceWasDir = sourceIsDir;
+    }
+
+    if (matchedOldNative == newNative) {
+        executeSqlUnlocked("COMMIT;");
+        return true;
+    }
+
+    QString oldDirPrefix = matchedOldNative;
+    if (!oldDirPrefix.endsWith(QLatin1Char('\\'))) {
+        oldDirPrefix.append(QLatin1Char('\\'));
+    }
+    QString newDirPrefix = newNative;
+    if (!newDirPrefix.endsWith(QLatin1Char('\\'))) {
+        newDirPrefix.append(QLatin1Char('\\'));
+    }
+    QString oldDirUpper = oldDirPrefix;
+    oldDirUpper[oldDirUpper.size() - 1] = QLatin1Char(']');
+
+    const QByteArray newPathUtf8 = newNative.toUtf8();
+    const QByteArray newNameUtf8 = newName.toUtf8();
+    const QString effectiveExt = sourceIsDir ? QString() : newExt;
+    const QByteArray newExtUtf8 = effectiveExt.toUtf8();
+    const QByteArray oldPathUtf8 = matchedOldNative.toUtf8();
+    const QByteArray newPrefixUtf8 = newDirPrefix.toUtf8();
+    const QByteArray lowerUtf8 = oldDirPrefix.toUtf8();
+    const QByteArray upperUtf8 = oldDirUpper.toUtf8();
+    const int substrStart = static_cast<int>(oldDirPrefix.toUcs4().size()) + 1;
+
+    // Remove any stale colliding destination row before moving source rows so UNIQUE(path) never fails
+    // while preserving the renamed item's rowid (and cached content/chunks FK).
+    if (sourceId != 0) {
+        ScopedStmt delCollisionStmt;
+        const char* delCollisionSql = "DELETE FROM files WHERE path = ?1 AND id != ?2;";
+        if (sqlite3_prepare_v2(m_db, delCollisionSql, -1, delCollisionStmt.receive(), nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(delCollisionStmt.get(), 1, newPathUtf8.constData(), newPathUtf8.size(), SQLITE_STATIC);
+            sqlite3_bind_int64(delCollisionStmt.get(), 2, sourceId);
+            sqlite3_step(delCollisionStmt.get());
+        }
+    }
+
+    {
+        ScopedStmt delChildCollisionStmt;
+        const char* delChildCollisionSql =
+            "DELETE FROM files "
+            "WHERE path IN ("
+            "    SELECT ?1 || SUBSTR(src.path, ?2) FROM files src WHERE src.path >= ?3 AND src.path < ?4"
+            ") AND NOT (path >= ?3 AND path < ?4);";
+        if (sqlite3_prepare_v2(m_db, delChildCollisionSql, -1, delChildCollisionStmt.receive(), nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(delChildCollisionStmt.get(), 1, newPrefixUtf8.constData(), newPrefixUtf8.size(), SQLITE_STATIC);
+            sqlite3_bind_int(delChildCollisionStmt.get(), 2, substrStart);
+            sqlite3_bind_text(delChildCollisionStmt.get(), 3, lowerUtf8.constData(), lowerUtf8.size(), SQLITE_STATIC);
+            sqlite3_bind_text(delChildCollisionStmt.get(), 4, upperUtf8.constData(), upperUtf8.size(), SQLITE_STATIC);
+            sqlite3_step(delChildCollisionStmt.get());
+        }
+    }
+
+    int affectedRows = 0;
+
     {
         ScopedStmt stmt;
         const char* sql =
@@ -773,10 +902,6 @@ bool DatabaseManager::renamePath(const QString& oldPath,
             executeSqlUnlocked("ROLLBACK;");
             return false;
         }
-        const QByteArray newPathUtf8 = newNative.toUtf8();
-        const QByteArray newNameUtf8 = newName.toUtf8();
-        const QByteArray newExtUtf8 = newExt.toUtf8();
-        const QByteArray oldPathUtf8 = oldNative.toUtf8();
 
         sqlite3_bind_text(stmt.get(), 1, newPathUtf8.constData(), newPathUtf8.size(), SQLITE_STATIC);
         sqlite3_bind_text(stmt.get(), 2, newNameUtf8.constData(), newNameUtf8.size(), SQLITE_STATIC);
@@ -788,40 +913,37 @@ bool DatabaseManager::renamePath(const QString& oldPath,
             executeSqlUnlocked("ROLLBACK;");
             return false;
         }
+        affectedRows += sqlite3_changes(m_db);
     }
-
-    QString oldDirPrefix = oldNative;
-    if (!oldDirPrefix.endsWith(QLatin1Char('\\'))) {
-        oldDirPrefix.append(QLatin1Char('\\'));
-    }
-    QString newDirPrefix = newNative;
-    if (!newDirPrefix.endsWith(QLatin1Char('\\'))) {
-        newDirPrefix.append(QLatin1Char('\\'));
-    }
-    QString oldDirUpper = oldDirPrefix;
-    oldDirUpper[oldDirUpper.size() - 1] = QLatin1Char(']');
 
     {
         ScopedStmt dirStmt;
         const char* dirSql =
             "UPDATE files SET path = ?1 || SUBSTR(path, ?2) WHERE path >= ?3 AND path < ?4;";
-        if (sqlite3_prepare_v2(m_db, dirSql, -1, dirStmt.receive(), nullptr) == SQLITE_OK) {
-            const QByteArray newPrefixUtf8 = newDirPrefix.toUtf8();
-            const QByteArray lowerUtf8 = oldDirPrefix.toUtf8();
-            const QByteArray upperUtf8 = oldDirUpper.toUtf8();
-            const int substrStart = oldDirPrefix.size() + 1;
-
-            sqlite3_bind_text(dirStmt.get(), 1, newPrefixUtf8.constData(), newPrefixUtf8.size(), SQLITE_STATIC);
-            sqlite3_bind_int(dirStmt.get(), 2, substrStart);
-            sqlite3_bind_text(dirStmt.get(), 3, lowerUtf8.constData(), lowerUtf8.size(), SQLITE_STATIC);
-            sqlite3_bind_text(dirStmt.get(), 4, upperUtf8.constData(), upperUtf8.size(), SQLITE_STATIC);
-            sqlite3_step(dirStmt.get());
+        if (sqlite3_prepare_v2(m_db, dirSql, -1, dirStmt.receive(), nullptr) != SQLITE_OK) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
         }
+
+        sqlite3_bind_text(dirStmt.get(), 1, newPrefixUtf8.constData(), newPrefixUtf8.size(), SQLITE_STATIC);
+        sqlite3_bind_int(dirStmt.get(), 2, substrStart);
+        sqlite3_bind_text(dirStmt.get(), 3, lowerUtf8.constData(), lowerUtf8.size(), SQLITE_STATIC);
+        sqlite3_bind_text(dirStmt.get(), 4, upperUtf8.constData(), upperUtf8.size(), SQLITE_STATIC);
+        if (sqlite3_step(dirStmt.get()) != SQLITE_DONE) {
+            dirStmt.reset();
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+        affectedRows += sqlite3_changes(m_db);
     }
 
     if (!executeSqlUnlocked("COMMIT;")) {
         executeSqlUnlocked("ROLLBACK;");
         return false;
+    }
+
+    if (outAffectedRows != nullptr) {
+        *outAffectedRows = affectedRows;
     }
     return true;
 }

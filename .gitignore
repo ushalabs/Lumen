@@ -9,6 +9,7 @@ cmake-build-*/
 *.exe
 !releases/*.exe
 *.dll
+!third_party/pdfium/bin/pdfium.dll
 *.pdb
 *.ilk
 *.obj
@@ -33,4 +34,18 @@ CMakeUserPresets.json
 testing_tmp/
 benchmark_results/
 *.log
+
+# Certificates, private keys, and secrets (never commit)
+*.pfx
+*.p12
+*.cer
+*.crt
+*.key
+*.pem
+*.snk
+*.secrets*
+.env
+.env.*
+packaging/certs/
+
 

@@ -41,6 +41,7 @@ public:
 
 signals:
     void fileChangesDetected(const QVector<lumen::indexing::FileChangeEvent>& events);
+    void watcherOverflowRescanNeeded(const QString& rootDirectory);
 
 private:
     void watcherThreadMain(QStringList roots, QSet<QString> ignoredLower);

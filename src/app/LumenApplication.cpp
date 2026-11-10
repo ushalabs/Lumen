@@ -28,7 +28,7 @@ bool LumenApplication::initialize(bool startBackgroundIndexer) {
     }
 
     core::Logger::instance().initialize(core::AppPaths::primaryLogFilePath());
-    core::Logger::info(QStringLiteral("App"), QStringLiteral("Starting UshaLabs Lumen v0.5.0."));
+    core::Logger::info(QStringLiteral("App"), QStringLiteral("Starting UshaLabs Lumen v0.5.1."));
 
     core::SettingsManager::instance().load();
 

@@ -6,3 +6,4 @@ Developed by UshaLabs.
 Third-Party Notices:
 - Qt 6 Toolkit: Dynamically linked under the GNU Lesser General Public License v3 (LGPLv3).
 - SQLite 3: Public Domain (https://www.sqlite.org/copyright.html).
+- PDFium: Dynamically linked under the BSD 3-Clause License (see third_party/pdfium/licenses/pdfium.txt).

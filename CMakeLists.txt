@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(Lumen
-    VERSION 0.5.0
+    VERSION 0.5.1
     DESCRIPTION "Lumen - Lightweight Offline Intelligent Search for Windows"
     HOMEPAGE_URL "https://ushalabs.com"
     LANGUAGES C CXX RC
@@ -65,6 +65,8 @@ set(LUMEN_LIB_SOURCES
     src/extraction/DocumentExtractor.h
     src/extraction/DocumentExtractor.cpp
     src/extraction/EnterpriseExtractors.cpp
+    src/extraction/PdfiumBackend.h
+    src/extraction/PdfiumBackend.cpp
     src/semantic/WordPieceTokenizer.h
     src/semantic/WordPieceTokenizer.cpp
     src/semantic/DocumentChunker.h
@@ -102,6 +104,7 @@ add_library(lumen_lib STATIC ${LUMEN_LIB_SOURCES})
 target_include_directories(lumen_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/pdfium/include
 )
 
 target_link_libraries(lumen_lib PUBLIC
@@ -135,6 +138,27 @@ if(MSVC)
     )
 endif()
 
+set(LUMEN_PDFIUM_DLL "${CMAKE_CURRENT_SOURCE_DIR}/third_party/pdfium/bin/pdfium.dll")
+if(EXISTS "${LUMEN_PDFIUM_DLL}")
+    add_custom_command(TARGET Lumen POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${LUMEN_PDFIUM_DLL}"
+            "$<TARGET_FILE_DIR:Lumen>/pdfium.dll"
+        COMMENT "Copying pdfium.dll alongside Lumen.exe"
+    )
+endif()
+
+option(LUMEN_BUILD_DEV_TOOLS "Build developer-only screenshot and measurement tools" OFF)
+if(LUMEN_BUILD_DEV_TOOLS)
+    add_executable(capture_screenshots WIN32
+        tools/capture_screenshots.cpp
+        assets/app.rc
+    )
+    target_link_libraries(capture_screenshots PRIVATE
+        lumen_lib
+    )
+endif()
+
 # ------------------------------------------------------------------------------
 # Automated Benchmark Executables
 # ------------------------------------------------------------------------------
@@ -152,6 +176,13 @@ add_executable(phase2_benchmark
 target_link_libraries(phase2_benchmark PRIVATE
     lumen_lib
 )
+if(EXISTS "${LUMEN_PDFIUM_DLL}")
+    add_custom_command(TARGET phase2_benchmark POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${LUMEN_PDFIUM_DLL}"
+            "$<TARGET_FILE_DIR:phase2_benchmark>/pdfium.dll"
+    )
+endif()
 
 add_executable(phase3_benchmark
     benchmarks/phase3_benchmark.cpp

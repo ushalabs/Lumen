@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <QVector>
 #include <atomic>
+#include <optional>
 
 struct sqlite3;
 struct sqlite3_stmt;
@@ -112,6 +113,7 @@ public:
 
     // Phase 1 writer and reconciliation operations (single-writer serialized via m_writeMutex)
     QHash<QString, ExistingFileMeta> queryExistingFilesUnderRoot(const QString& rootDirectory) const;
+    std::optional<ExistingFileMeta> queryFileMetaByPath(const QString& path) const;
 
     bool upsertFileBatch(const QVector<FileRecord>& records,
                          const std::atomic_bool* cancelFlag = nullptr);
@@ -122,7 +124,9 @@ public:
     bool renamePath(const QString& oldPath,
                     const QString& newPath,
                     const QString& newName,
-                    const QString& newExt);
+                    const QString& newExt,
+                    int* outAffectedRows = nullptr,
+                    bool* outSourceWasDir = nullptr);
     bool clearAllFiles();
 
     // Phase 2 Document Content Indexing operations

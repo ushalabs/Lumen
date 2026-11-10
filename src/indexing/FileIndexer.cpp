@@ -51,21 +51,23 @@ qint64 fileTimeToUnixSeconds(const FILETIME& ft) noexcept {
     return static_cast<qint64>((ull.QuadPart - kEpochDiff100Ns) / 10000000ULL);
 }
 
+std::wstring toLongPath(const QString& nativePath) {
+    if (nativePath.size() >= 240 && !nativePath.startsWith(QStringLiteral("\\\\?\\"))) {
+        if (nativePath.startsWith(QStringLiteral("\\\\"))) {
+            return (QStringLiteral("\\\\?\\UNC\\") + nativePath.mid(2)).toStdWString();
+        }
+        return (QStringLiteral("\\\\?\\") + nativePath).toStdWString();
+    }
+    return nativePath.toStdWString();
+}
+
 std::wstring toLongPathPattern(const QString& nativeDir) {
     QString pattern = nativeDir;
     if (!pattern.endsWith(QLatin1Char('\\'))) {
         pattern.append(QLatin1Char('\\'));
     }
     pattern.append(QLatin1Char('*'));
-
-    if (pattern.size() >= 240 && !pattern.startsWith(QStringLiteral("\\\\?\\"))) {
-        if (pattern.startsWith(QStringLiteral("\\\\"))) {
-            pattern = QStringLiteral("\\\\?\\UNC\\") + pattern.mid(2);
-        } else {
-            pattern = QStringLiteral("\\\\?\\") + pattern;
-        }
-    }
-    return pattern.toStdWString();
+    return toLongPath(pattern);
 }
 
 void extractNameAndExtension(const QString& fileName, QString* outExtension) {
@@ -108,6 +110,11 @@ FileIndexer::FileIndexer(QObject* parent)
             this,
             &FileIndexer::onWatcherEvents,
             Qt::QueuedConnection);
+    connect(&m_watcher,
+            &DirectoryWatcher::watcherOverflowRescanNeeded,
+            this,
+            &FileIndexer::onWatcherOverflowRescan,
+            Qt::QueuedConnection);
 }
 
 FileIndexer::~FileIndexer() {
@@ -126,6 +133,8 @@ void FileIndexer::startBackgroundIndexing(const QStringList& watchedRoots,
     for (const QString& dir : ignoredDirNames) {
         m_ignoredLower.insert(dir.trimmed().toLower());
     }
+    m_incrementalContentEnabled = extractContent;
+    m_incrementalMaxDocBytes = maxDocumentBytes;
 
     m_cancelRequested.store(false, std::memory_order_release);
     m_watcher.startWatching(watchedRoots, ignoredDirNames);
@@ -404,9 +413,13 @@ IndexingStatistics FileIndexer::runScanAndReconcile(const QStringList& watchedRo
             QStringList stalePaths;
             stalePaths.reserve(existingMap.size());
             for (auto it = existingMap.begin(); it != existingMap.end(); ++it) {
-                stalePaths.append(it.key());
+                WIN32_FILE_ATTRIBUTE_DATA checkAttr{};
+                const std::wstring wideStale = toLongPath(it.key());
+                if (!GetFileAttributesExW(wideStale.c_str(), GetFileExInfoStandard, &checkAttr)) {
+                    stalePaths.append(it.key());
+                }
             }
-            if (db.deleteFileBatch(stalePaths)) {
+            if (!stalePaths.isEmpty() && db.deleteFileBatch(stalePaths)) {
                 stats.filesDeleted += stalePaths.size();
             }
         }
@@ -664,6 +677,157 @@ qint64 FileIndexer::runSemanticIndexingPass(int maxSemanticFiles,
     return embeddedDocs;
 }
 
+void FileIndexer::reconcileDirectorySubtree(const QString& dirPath,
+                                          qint64 maxDocumentBytes,
+                                          bool* outHasEligibleDocChange) {
+    const QString cleanRoot = QDir::toNativeSeparators(QDir::cleanPath(dirPath));
+    auto& db = database::DatabaseManager::instance();
+
+    WIN32_FILE_ATTRIBUTE_DATA rootAttr{};
+    const std::wstring wideRoot = toLongPath(cleanRoot);
+    if (!GetFileAttributesExW(wideRoot.c_str(), GetFileExInfoStandard, &rootAttr) ||
+        (rootAttr.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 ||
+        (rootAttr.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+        db.removeFileByPath(cleanRoot);
+        return;
+    }
+
+    const QString rootName = QFileInfo(cleanRoot).fileName();
+    if (m_ignoredLower.contains(rootName.toLower())) {
+        db.removeFileByPath(cleanRoot);
+        return;
+    }
+
+    QVector<database::FileRecord> pendingUpserts;
+    pendingUpserts.reserve(256);
+
+    const qint64 rootMtime = fileTimeToUnixSeconds(rootAttr.ftLastWriteTime);
+    const auto existingRootMeta = db.queryFileMetaByPath(cleanRoot);
+    if (!existingRootMeta.has_value() || !existingRootMeta->isDir || existingRootMeta->mtime != rootMtime) {
+        database::FileRecord rootRec;
+        rootRec.path = cleanRoot;
+        rootRec.name = rootName;
+        rootRec.size = 0;
+        rootRec.mtime = rootMtime;
+        rootRec.isDir = true;
+        pendingUpserts.append(std::move(rootRec));
+    }
+
+    QHash<QString, database::ExistingFileMeta> existingMap = db.queryExistingFilesUnderRoot(cleanRoot);
+    QVector<QString> dirStack;
+    dirStack.append(cleanRoot);
+
+    while (!dirStack.isEmpty() && !m_cancelRequested.load(std::memory_order_relaxed)) {
+        const QString currentDir = dirStack.takeLast();
+        WIN32_FIND_DATAW findData{};
+        const std::wstring pattern = toLongPathPattern(currentDir);
+        ScopedFindHandle hFind(FindFirstFileExW(
+            pattern.c_str(),
+            FindExInfoBasic,
+            &findData,
+            FindExSearchNameMatch,
+            nullptr,
+            FIND_FIRST_EX_LARGE_FETCH));
+
+        if (!hFind.isValid()) {
+            continue;
+        }
+
+        do {
+            const wchar_t* wName = findData.cFileName;
+            if (wName[0] == L'.' && (wName[1] == L'\0' || (wName[1] == L'.' && wName[2] == L'\0'))) {
+                continue;
+            }
+
+            const DWORD attrs = findData.dwFileAttributes;
+            if ((attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+                continue;
+            }
+
+            const QString entryName = QString::fromWCharArray(wName);
+            const QString entryNameLower = entryName.toLower();
+            const QString fullPath = currentDir + QLatin1Char('\\') + entryName;
+
+            if ((attrs & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+                if (m_ignoredLower.contains(entryNameLower)) {
+                    continue;
+                }
+                dirStack.append(fullPath);
+
+                const qint64 dirMtime = fileTimeToUnixSeconds(findData.ftLastWriteTime);
+                auto it = existingMap.find(fullPath);
+                if (it != existingMap.end()) {
+                    const auto meta = it.value();
+                    existingMap.erase(it);
+                    if (meta.isDir && meta.mtime == dirMtime) {
+                        continue;
+                    }
+                }
+
+                database::FileRecord dirRec;
+                dirRec.path = fullPath;
+                dirRec.name = entryName;
+                dirRec.size = 0;
+                dirRec.mtime = dirMtime;
+                dirRec.isDir = true;
+                pendingUpserts.append(std::move(dirRec));
+            } else {
+                if (isSensitiveCredentialFile(entryNameLower)) {
+                    continue;
+                }
+
+                const qint64 fileSize = (static_cast<qint64>(findData.nFileSizeHigh) << 32) |
+                                        static_cast<qint64>(findData.nFileSizeLow);
+                const qint64 mtime = fileTimeToUnixSeconds(findData.ftLastWriteTime);
+
+                auto it = existingMap.find(fullPath);
+                if (it != existingMap.end()) {
+                    const auto meta = it.value();
+                    existingMap.erase(it);
+                    if (!meta.isDir && meta.size == fileSize && meta.mtime == mtime) {
+                        continue;
+                    }
+                }
+
+                database::FileRecord rec;
+                rec.path = fullPath;
+                rec.name = entryName;
+                extractNameAndExtension(entryName, &rec.extension);
+                rec.size = fileSize;
+                rec.mtime = mtime;
+
+                const bool isMedia = extraction::DocumentExtractor::isMediaMetadataExtension(rec.extension);
+                if (outHasEligibleDocChange != nullptr &&
+                    extraction::DocumentExtractor::isSupportedExtension(rec.extension) &&
+                    rec.size > 0 && (isMedia || rec.size <= maxDocumentBytes)) {
+                    *outHasEligibleDocChange = true;
+                }
+                pendingUpserts.append(std::move(rec));
+            }
+
+            if (pendingUpserts.size() >= kBatchTransactionSize) {
+                db.upsertFileBatch(pendingUpserts, &m_cancelRequested);
+                pendingUpserts.clear();
+            }
+        } while (FindNextFileW(hFind.get(), &findData) != FALSE &&
+                 !m_cancelRequested.load(std::memory_order_relaxed));
+    }
+
+    if (!pendingUpserts.isEmpty() && !m_cancelRequested.load(std::memory_order_relaxed)) {
+        db.upsertFileBatch(pendingUpserts, &m_cancelRequested);
+        pendingUpserts.clear();
+    }
+
+    if (!existingMap.isEmpty() && !m_cancelRequested.load(std::memory_order_relaxed)) {
+        QStringList stalePaths;
+        stalePaths.reserve(existingMap.size());
+        for (auto it = existingMap.begin(); it != existingMap.end(); ++it) {
+            stalePaths.append(it.key());
+        }
+        db.deleteFileBatch(stalePaths);
+    }
+}
+
 void FileIndexer::applyIncrementalChanges(const QVector<FileChangeEvent>& events,
                                           bool extractContent,
                                           qint64 maxDocumentBytes) {
@@ -671,9 +835,56 @@ void FileIndexer::applyIncrementalChanges(const QVector<FileChangeEvent>& events
         return;
     }
 
+    std::lock_guard<std::recursive_mutex> incLock(m_incrementalMutex);
     auto& db = database::DatabaseManager::instance();
     QVector<database::FileRecord> upserts;
     bool hasEligibleDocChange = false;
+
+    auto flushPendingUpserts = [&]() {
+        if (!upserts.isEmpty()) {
+            db.upsertFileBatch(upserts, &m_cancelRequested);
+            upserts.clear();
+        }
+    };
+
+    auto applyAddedOrModified = [&](const QString& cleanPath) {
+        WIN32_FILE_ATTRIBUTE_DATA attrData{};
+        const std::wstring widePath = toLongPath(cleanPath);
+        if (!GetFileAttributesExW(widePath.c_str(), GetFileExInfoStandard, &attrData)) {
+            flushPendingUpserts();
+            db.removeFileByPath(cleanPath);
+            return;
+        }
+        if ((attrData.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+            return;
+        }
+        if ((attrData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+            flushPendingUpserts();
+            reconcileDirectorySubtree(cleanPath, maxDocumentBytes, &hasEligibleDocChange);
+            return;
+        }
+
+        const QFileInfo fi(cleanPath);
+        const QString fileName = fi.fileName();
+        if (isSensitiveCredentialFile(fileName.toLower())) {
+            return;
+        }
+
+        database::FileRecord rec;
+        rec.path = cleanPath;
+        rec.name = fileName;
+        extractNameAndExtension(fileName, &rec.extension);
+        rec.size = (static_cast<qint64>(attrData.nFileSizeHigh) << 32) |
+                   static_cast<qint64>(attrData.nFileSizeLow);
+        rec.mtime = fileTimeToUnixSeconds(attrData.ftLastWriteTime);
+
+        const bool isMedia = extraction::DocumentExtractor::isMediaMetadataExtension(rec.extension);
+        if (extraction::DocumentExtractor::isSupportedExtension(rec.extension) &&
+            rec.size > 0 && (isMedia || rec.size <= maxDocumentBytes)) {
+            hasEligibleDocChange = true;
+        }
+        upserts.append(std::move(rec));
+    };
 
     for (const FileChangeEvent& ev : events) {
         if (m_cancelRequested.load(std::memory_order_relaxed)) {
@@ -683,89 +894,68 @@ void FileIndexer::applyIncrementalChanges(const QVector<FileChangeEvent>& events
         const QString cleanPath = QDir::toNativeSeparators(QDir::cleanPath(ev.path));
         switch (ev.action) {
             case FileChangeAction::Removed: {
-                db.removeFileByPath(cleanPath);
+                flushPendingUpserts();
+                WIN32_FILE_ATTRIBUTE_DATA attrData{};
+                if (GetFileAttributesExW(toLongPath(cleanPath).c_str(), GetFileExInfoStandard, &attrData)) {
+                    // Rapid replace or out-of-order notification: target exists on disk, so reconcile rather than delete
+                    applyAddedOrModified(cleanPath);
+                } else {
+                    db.removeFileByPath(cleanPath);
+                }
                 break;
             }
             case FileChangeAction::Renamed: {
+                flushPendingUpserts();
                 const QString oldClean = QDir::toNativeSeparators(QDir::cleanPath(ev.oldPath));
                 const QFileInfo newFi(cleanPath);
                 const QString newName = newFi.fileName();
-                if (isSensitiveCredentialFile(newName.toLower())) {
-                    db.removeFileByPath(oldClean);
-                    break;
-                }
+
+                const auto oldMeta = db.queryFileMetaByPath(oldClean);
                 WIN32_FILE_ATTRIBUTE_DATA attrData{};
-                const bool isDir = GetFileAttributesExW(
-                                       cleanPath.toStdWString().c_str(),
-                                       GetFileExInfoStandard,
-                                       &attrData) &&
-                                   ((attrData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0);
-                if (isDir && m_ignoredLower.contains(newName.toLower())) {
+                const bool targetExists =
+                    GetFileAttributesExW(toLongPath(cleanPath).c_str(), GetFileExInfoStandard, &attrData) != FALSE;
+                const bool targetIsDir =
+                    targetExists && ((attrData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0);
+                const bool isDir = targetExists ? targetIsDir : (oldMeta.has_value() && oldMeta->isDir);
+
+                if (isSensitiveCredentialFile(newName.toLower()) ||
+                    (isDir && m_ignoredLower.contains(newName.toLower()))) {
+                    db.removeFileByPath(oldClean);
+                    if (targetExists) {
+                        db.removeFileByPath(cleanPath);
+                    }
+                    break;
+                }
+                if (targetExists && (attrData.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
                     db.removeFileByPath(oldClean);
                     break;
                 }
+
                 QString newExt;
                 if (!isDir) {
                     extractNameAndExtension(newName, &newExt);
                 }
                 db.renamePath(oldClean, cleanPath, newName, newExt);
+
+                // For populated directories, perform targeted subtree reconciliation so any files added/missed
+                // around the OS rename window are synced without rescanning unrelated drives.
+                if (targetIsDir) {
+                    reconcileDirectorySubtree(cleanPath, maxDocumentBytes, &hasEligibleDocChange);
+                    if (oldClean.compare(cleanPath, Qt::CaseInsensitive) != 0 &&
+                        !GetFileAttributesExW(toLongPath(oldClean).c_str(), GetFileExInfoStandard, &attrData)) {
+                        db.removeFileByPath(oldClean);
+                    }
+                }
                 break;
             }
             case FileChangeAction::AddedOrModified: {
-                WIN32_FILE_ATTRIBUTE_DATA attrData{};
-                const std::wstring widePath = cleanPath.toStdWString();
-                if (!GetFileAttributesExW(widePath.c_str(), GetFileExInfoStandard, &attrData)) {
-                    db.removeFileByPath(cleanPath);
-                    break;
-                }
-                if ((attrData.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-                    break;
-                }
-                if ((attrData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-                    const QString dirName = QFileInfo(cleanPath).fileName();
-                    if (m_ignoredLower.contains(dirName.toLower())) {
-                        break;
-                    }
-                    database::FileRecord dirRec;
-                    dirRec.path = cleanPath;
-                    dirRec.name = dirName;
-                    dirRec.size = 0;
-                    dirRec.mtime = fileTimeToUnixSeconds(attrData.ftLastWriteTime);
-                    dirRec.isDir = true;
-                    upserts.append(std::move(dirRec));
-                    runScanAndReconcile({cleanPath}, QStringList(m_ignoredLower.begin(), m_ignoredLower.end()));
-                    hasEligibleDocChange = true;
-                    break;
-                }
-
-                const QFileInfo fi(cleanPath);
-                const QString fileName = fi.fileName();
-                if (isSensitiveCredentialFile(fileName.toLower())) {
-                    break;
-                }
-
-                database::FileRecord rec;
-                rec.path = cleanPath;
-                rec.name = fileName;
-                extractNameAndExtension(fileName, &rec.extension);
-                rec.size = (static_cast<qint64>(attrData.nFileSizeHigh) << 32) |
-                           static_cast<qint64>(attrData.nFileSizeLow);
-                rec.mtime = fileTimeToUnixSeconds(attrData.ftLastWriteTime);
-
-                const bool isMedia = extraction::DocumentExtractor::isMediaMetadataExtension(rec.extension);
-                if (extraction::DocumentExtractor::isSupportedExtension(rec.extension) &&
-                    rec.size > 0 && (isMedia || rec.size <= maxDocumentBytes)) {
-                    hasEligibleDocChange = true;
-                }
-                upserts.append(std::move(rec));
+                applyAddedOrModified(cleanPath);
                 break;
             }
         }
     }
 
-    if (!upserts.isEmpty()) {
-        db.upsertFileBatch(upserts, &m_cancelRequested);
-    }
+    flushPendingUpserts();
 
     if (extractContent && hasEligibleDocChange && !m_cancelRequested.load(std::memory_order_relaxed)) {
         runContentExtractionPass(kDefaultMaxContentFiles, maxDocumentBytes, nullptr);
@@ -778,7 +968,20 @@ void FileIndexer::onWatcherEvents(const QVector<FileChangeEvent>& events) {
     if (m_paused.load(std::memory_order_relaxed)) {
         return;
     }
-    applyIncrementalChanges(events);
+    applyIncrementalChanges(events, m_incrementalContentEnabled, m_incrementalMaxDocBytes);
+}
+
+void FileIndexer::onWatcherOverflowRescan(const QString& rootDirectory) {
+    if (m_paused.load(std::memory_order_relaxed) || m_cancelRequested.load(std::memory_order_relaxed)) {
+        return;
+    }
+    std::lock_guard<std::recursive_mutex> incLock(m_incrementalMutex);
+    bool hasEligibleDocChange = false;
+    reconcileDirectorySubtree(rootDirectory, m_incrementalMaxDocBytes, &hasEligibleDocChange);
+    if (m_incrementalContentEnabled && hasEligibleDocChange && !m_cancelRequested.load(std::memory_order_relaxed)) {
+        runContentExtractionPass(kDefaultMaxContentFiles, m_incrementalMaxDocBytes, nullptr);
+    }
+    emit incrementalUpdateApplied(1);
 }
 
 } // namespace lumen::indexing

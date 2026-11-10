@@ -1,6 +1,8 @@
-param(
-    [string]$Version = "0.5.0",
-    [string]$OutputDir = ""
+﻿param(
+    [string]$Version = "0.5.1",
+    [string]$OutputDir = "",
+    [string]$CertPfxPath = $env:LUMEN_SIGNING_PFX,
+    [switch]$SkipSigning
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,10 +51,16 @@ if ($LASTEXITCODE -ne 0) {
     throw "windeployqt failed with exit code $LASTEXITCODE"
 }
 
-# 3. Copy ONNX Runtime & Bundled Model Assets
-Write-Host "==> Bundling ONNX Runtime & MiniLM-L6-v2 embeddings model..."
+# 3. Copy ONNX Runtime, PDFium & Bundled Model Assets
+Write-Host "==> Bundling ONNX Runtime, PDFium & MiniLM-L6-v2 embeddings model..."
 $onnxDll = Join-Path $projectRoot "third_party\onnxruntime\lib\onnxruntime.dll"
 Copy-Item $onnxDll (Join-Path $stageDir "onnxruntime.dll") -Force
+
+$pdfiumDll = Join-Path $projectRoot "third_party\pdfium\bin\pdfium.dll"
+if (-not (Test-Path $pdfiumDll)) {
+    throw "Required PDFium runtime missing at $pdfiumDll"
+}
+Copy-Item $pdfiumDll (Join-Path $stageDir "pdfium.dll") -Force
 
 $modelTargetDir = Join-Path $stageDir "models\all-MiniLM-L6-v2"
 New-Item -ItemType Directory -Force -Path $modelTargetDir | Out-Null
@@ -130,17 +138,24 @@ if ($LASTEXITCODE -ne 0) {
     throw "makeappx failed with exit code $LASTEXITCODE"
 }
 
-# 7. Code Sign MSIX with UshaLabs Certificate
-$pfxFile = Join-Path $PSScriptRoot "certs\UshaLabs.pfx"
-$cerFile = Join-Path $PSScriptRoot "certs\UshaLabs.cer"
-if (-not (Test-Path $pfxFile)) {
-    throw "Certificate not found at $pfxFile"
-}
+# 7. Code Sign MSIX Using Externally Supplied Signing Credentials
+$cerFile = ""
+if (-not $SkipSigning) {
+    $certPassword = $env:LUMEN_SIGNING_PASSWORD
+    if (-not $CertPfxPath -or -not (Test-Path -LiteralPath $CertPfxPath -PathType Leaf)) {
+        throw "Signing certificate PFX not supplied. Pass -CertPfxPath or set LUMEN_SIGNING_PFX, or pass -SkipSigning for unsigned validation."
+    }
+    if (-not $certPassword) {
+        throw "Signing password environment variable LUMEN_SIGNING_PASSWORD is not set."
+    }
 
-Write-Host "==> Signing MSIX with UshaLabs certificate..."
-& $signtool sign /fd SHA256 /a /f $pfxFile /p "UshaLabs2026!" $msixPath
-if ($LASTEXITCODE -ne 0) {
-    throw "signtool sign failed with exit code $LASTEXITCODE"
+    Write-Host "==> Signing MSIX with external certificate..."
+    & $signtool sign /fd SHA256 /a /f $CertPfxPath /p $certPassword $msixPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "signtool sign failed with exit code $LASTEXITCODE"
+    }
+} else {
+    Write-Host "==> Skipping MSIX Authenticode signing (-SkipSigning)."
 }
 
 # 8. Create 1-Click Zero-Warning Installer Scripts for Users
@@ -277,7 +292,9 @@ if (Test-Path $bundleDir) { Remove-Item -Recurse -Force $bundleDir }
 New-Item -ItemType Directory -Force -Path $bundleDir | Out-Null
 
 Copy-Item $msixPath (Join-Path $bundleDir (Split-Path $msixPath -Leaf))
-Copy-Item $cerFile (Join-Path $bundleDir "UshaLabs.cer")
+if ($cerFile -and (Test-Path -LiteralPath $cerFile)) {
+    Copy-Item $cerFile (Join-Path $bundleDir "UshaLabs.cer")
+}
 Set-Content -Path (Join-Path $bundleDir "Install-Lumen.ps1") -Value $installPs1 -Encoding UTF8
 Set-Content -Path (Join-Path $bundleDir "Install-Lumen.bat") -Value $installBat -Encoding ASCII
 Set-Content -Path (Join-Path $bundleDir "README.txt") -Value $readmeTxt -Encoding UTF8

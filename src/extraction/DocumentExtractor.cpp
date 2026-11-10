@@ -1,6 +1,7 @@
 #include "extraction/DocumentExtractor.h"
 
 #include "extraction/DeflateCodec.h"
+#include "extraction/PdfiumBackend.h"
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -547,6 +548,10 @@ ExtractedDocument DocumentExtractor::extractDocxBytes(const QByteArray& zipBytes
 }
 
 ExtractedDocument DocumentExtractor::extractPdfBytes(const QByteArray& pdfBytes) {
+    if (PdfiumBackend::instance().isAvailable()) {
+        return PdfiumBackend::instance().extractFromBytes(pdfBytes, kMaxExtractedChars);
+    }
+
     ExtractedDocument doc;
     if (pdfBytes.size() < 16 || !pdfBytes.startsWith("%PDF-")) {
         doc.errorReason = QStringLiteral("Invalid PDF header.");
@@ -825,41 +830,49 @@ QByteArray DocumentExtractor::buildValidPdfBytes(const QStringList& pagesText, b
     QByteArray pdf;
     pdf.append("%PDF-1.4\n");
 
-    // Object 1: Catalog, Object 2: Pages
+    const int pageCount = static_cast<int>(pagesText.size());
+    const int fontObjId = 3 + pageCount * 2;
+    QVector<qint64> objOffsets(fontObjId + 1, 0);
+
+    // Object 1: Catalog
+    objOffsets[1] = pdf.size();
     pdf.append("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
 
+    // Object 2: Pages tree
     QByteArray kidsArray;
-    int nextObjId = 3;
-    for (int i = 0; i < pagesText.size(); ++i) {
-        kidsArray.append(QStringLiteral("%1 0 R ").arg(nextObjId).toLatin1());
-        nextObjId += 2;
+    for (int i = 0; i < pageCount; ++i) {
+        kidsArray.append(QStringLiteral("%1 0 R ").arg(3 + i * 2).toLatin1());
     }
-
+    objOffsets[2] = pdf.size();
     pdf.append(QStringLiteral("2 0 obj\n<< /Type /Pages /Kids [ %1] /Count %2 >>\nendobj\n")
                    .arg(QString::fromLatin1(kidsArray))
-                   .arg(pagesText.size())
+                   .arg(pageCount)
                    .toLatin1());
 
-    nextObjId = 3;
-    for (const QString& pageStr : pagesText) {
-        const int pageObjId = nextObjId++;
-        const int contentObjId = nextObjId++;
+    for (int i = 0; i < pageCount; ++i) {
+        const int pageObjId = 3 + i * 2;
+        const int contentObjId = 4 + i * 2;
 
-        pdf.append(QStringLiteral("%1 0 obj\n<< /Type /Page /Parent 2 0 R /Contents %2 0 R >>\nendobj\n")
+        objOffsets[pageObjId] = pdf.size();
+        pdf.append(QStringLiteral("%1 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                                  "/Resources << /Font << /F1 %2 0 R >> >> /Contents %3 0 R >>\nendobj\n")
                        .arg(pageObjId)
+                       .arg(fontObjId)
                        .arg(contentObjId)
                        .toLatin1());
 
-        QString escaped = pageStr;
+        QString escaped = pagesText.at(i);
         escaped.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
         escaped.replace(QLatin1Char('('), QStringLiteral("\\("));
         escaped.replace(QLatin1Char(')'), QStringLiteral("\\)"));
 
+        // WinAnsi Type1 font expects Latin-1 single-byte encoding for characters 0x20..0xFF
         const QByteArray rawStream = QStringLiteral("BT /F1 12 Tf 72 720 Td (%1) Tj ET")
                                          .arg(escaped)
-                                         .toUtf8();
+                                         .toLatin1();
         const QByteArray payload = flateCompress ? DeflateCodec::compressZlibStored(rawStream) : rawStream;
 
+        objOffsets[contentObjId] = pdf.size();
         pdf.append(QStringLiteral("%1 0 obj\n<< /Length %2 %3>>\nstream\n")
                        .arg(contentObjId)
                        .arg(payload.size())
@@ -869,7 +882,23 @@ QByteArray DocumentExtractor::buildValidPdfBytes(const QStringList& pagesText, b
         pdf.append("\nendstream\nendobj\n");
     }
 
-    pdf.append("%%EOF\n");
+    objOffsets[fontObjId] = pdf.size();
+    pdf.append(QStringLiteral("%1 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
+                              "/Encoding /WinAnsiEncoding >>\nendobj\n")
+                   .arg(fontObjId)
+                   .toLatin1());
+
+    const qint64 xrefPos = pdf.size();
+    pdf.append(QStringLiteral("xref\n0 %1\n0000000000 65535 f \n").arg(fontObjId + 1).toLatin1());
+    for (int id = 1; id <= fontObjId; ++id) {
+        pdf.append(QStringLiteral("%1 00000 n \n")
+                       .arg(objOffsets.at(id), 10, 10, QLatin1Char('0'))
+                       .toLatin1());
+    }
+    pdf.append(QStringLiteral("trailer\n<< /Size %1 /Root 1 0 R >>\nstartxref\n%2\n%%EOF\n")
+                   .arg(fontObjId + 1)
+                   .arg(xrefPos)
+                   .toLatin1());
     return pdf;
 }
 
