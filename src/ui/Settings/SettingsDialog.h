@@ -27,10 +27,12 @@ private slots:
     void onAddFolderClicked();
     void onRemoveFolderClicked();
     void onRebuildIndexClicked();
+    void onAppearanceChanged();
 
 private:
     void loadFromSettings();
     void refreshDbStatusLabel();
+    void applyThemeStyles(bool dark);
 
     QCheckBox* m_desktopBarVisibleCheck = nullptr;
     QCheckBox* m_alwaysOnTopCheck = nullptr;
@@ -42,6 +44,8 @@ private:
     QCheckBox* m_enableSemanticCheck = nullptr;
     QListWidget* m_watchedFoldersList = nullptr;
     QLabel* m_dbStatusLabel = nullptr;
+    QLabel* m_dbPathLabel = nullptr;
+    QLabel* m_signatureLabel = nullptr;
 };
 
 } // namespace lumen::ui

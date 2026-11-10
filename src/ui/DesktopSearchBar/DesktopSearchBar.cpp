@@ -17,6 +17,7 @@
 #include <QDir>
 #include <QEvent>
 #include <QFont>
+#include <QFontMetrics>
 #include <QGuiApplication>
 #include <QKeyEvent>
 #include <QMetaObject>
@@ -52,17 +53,18 @@ DesktopSearchBar::DesktopSearchBar(QWidget* parent)
     m_searchPool.setExpiryTimeout(5000); // Reclaim search worker thread after 5s of inactivity
 
     m_searchEdit = new QLineEdit(this);
-    m_searchEdit->setPlaceholderText(QStringLiteral("Search anything on your PC..."));
+    m_searchEdit->setPlaceholderText(QStringLiteral("Search your files..."));
     m_searchEdit->setFrame(false);
-    m_searchEdit->setGeometry(50, 10, kBarWidth - 50 - 105, 32);
-    m_searchEdit->setFont(QFont(QStringLiteral("Segoe UI"), 10));
+    m_searchEdit->setFont(ThemeTokens::makeFont(14, QFont::Normal));
     m_searchEdit->setAttribute(Qt::WA_MacShowFocusRect, false);
     m_searchEdit->setContextMenuPolicy(Qt::DefaultContextMenu);
     m_searchEdit->installEventFilter(this);
 
     m_popupWidget = new SearchPopupWidget(this);
-    m_popupWidget->setGeometry(0, kBarHeight + kPopupGap, kBarWidth, kPopupHeight);
+    m_popupWidget->setGeometry(0, kBarHeight + kPopupGap, kPopupWidth, kPopupHeight);
     m_popupWidget->hide();
+
+    updateSearchInputGeometry();
 
     connect(m_searchEdit, &QLineEdit::textChanged, this, &DesktopSearchBar::onSearchTextChanged);
     connect(m_popupWidget, &SearchPopupWidget::resultActivated, this, &DesktopSearchBar::onResultActivated);
@@ -203,6 +205,8 @@ void DesktopSearchBar::applySavedOrDefaultPosition() {
     } else {
         targetPos = computeDefaultDesktopPosition();
     }
+    m_collapsedAnchorPos = targetPos;
+    m_expandedXShift = 0;
     move(targetPos);
 }
 
@@ -236,6 +240,7 @@ void DesktopSearchBar::refreshAppearanceFromSettings() {
     const QString placeholderColor = theme.textSecondary.name();
     const QString selectionBg = theme.brandPink.name();
 
+    m_searchEdit->setFont(ThemeTokens::makeFont(14, QFont::Normal));
     m_searchEdit->setStyleSheet(QStringLiteral(
         "QLineEdit {"
         "  background: transparent;"
@@ -255,6 +260,7 @@ void DesktopSearchBar::refreshAppearanceFromSettings() {
     if (!m_isSearchActive) {
         applyRestingWindowZOrder();
     }
+    updateSearchInputGeometry();
     update();
 }
 
@@ -334,6 +340,27 @@ void DesktopSearchBar::setSearchText(const QString& text) {
     }
 }
 
+QRectF DesktopSearchBar::barShellRect() const {
+    const qreal left = static_cast<qreal>(m_expandedXShift) + 1.0;
+    return QRectF(left, 1.0, kBarWidth - 2.0, kBarHeight - 2.0);
+}
+
+QRectF DesktopSearchBar::clearButtonHitRect() const {
+    const QRectF shell = barShellRect();
+    return QRectF(shell.right() - 34.0, 14.0, 22.0, 22.0);
+}
+
+void DesktopSearchBar::updateSearchInputGeometry() {
+    if (!m_searchEdit) {
+        return;
+    }
+    const int baseLeft = m_expandedXShift + 42;
+    const bool hasText = !m_searchEdit->text().trimmed().isEmpty();
+    const int rightReserve = hasText ? 42 : 98;
+    const int editWidth = std::max(120, kBarWidth - 42 - rightReserve);
+    m_searchEdit->setGeometry(baseLeft, 10, editWidth, 32);
+}
+
 void DesktopSearchBar::setPopupExpanded(bool expanded) {
     if (m_popupExpanded == expanded) {
         if (m_popupExpanded) {
@@ -341,13 +368,20 @@ void DesktopSearchBar::setPopupExpanded(bool expanded) {
         }
         return;
     }
-    m_popupExpanded = expanded;
-    if (m_popupExpanded) {
+
+    if (expanded) {
+        m_collapsedAnchorPos = pos();
+        m_popupExpanded = true;
         updateExpandedGeometry();
         m_popupWidget->show();
     } else {
+        const QPoint restorePos = QPoint(pos().x() + m_expandedXShift, pos().y());
+        m_popupExpanded = false;
+        m_expandedXShift = 0;
         m_popupWidget->hide();
         setFixedSize(kBarWidth, kBarHeight);
+        move(restorePos);
+        updateSearchInputGeometry();
     }
     update();
     emit popupVisibilityChanged(m_popupExpanded);
@@ -357,19 +391,51 @@ void DesktopSearchBar::updateExpandedGeometry() {
     if (!m_popupExpanded || m_popupWidget == nullptr) {
         return;
     }
+
+    const QPoint anchorPos = QPoint(pos().x() + m_expandedXShift, pos().y());
+    const int popW = kPopupWidth;
     const int popH = m_popupWidget->desiredPopupHeight();
     const int totalH = kBarHeight + kPopupGap + popH;
-    if (height() != totalH) {
-        setFixedSize(kBarWidth, totalH);
+
+    // Align the right edge of the expanded 620px popup with the right edge of the 460px desktop bar,
+    // while clamping cleanly within the current screen's available work area.
+    const QPoint centerPoint(anchorPos.x() + kBarWidth / 2, anchorPos.y() + kBarHeight / 2);
+    const QScreen* screen = QGuiApplication::screenAt(centerPoint);
+    if (screen == nullptr) {
+        screen = QGuiApplication::primaryScreen();
     }
-    m_popupWidget->setGeometry(0, kBarHeight + kPopupGap, kBarWidth, popH);
+
+    int targetWinX = anchorPos.x() - (popW - kBarWidth);
+    if (screen != nullptr) {
+        const QRect workArea = screen->availableGeometry();
+        const int minX = workArea.left() + 8;
+        const int maxX = qMax(minX, workArea.right() - popW - 8);
+        targetWinX = qBound(minX, targetWinX, maxX);
+        // Ensure targetWinX never shifts right past anchorPos.x()
+        if (targetWinX > anchorPos.x()) {
+            targetWinX = anchorPos.x();
+        }
+    }
+
+    m_expandedXShift = anchorPos.x() - targetWinX;
+    const int winW = std::max(popW, m_expandedXShift + kBarWidth);
+
+    if (width() != winW || height() != totalH) {
+        setFixedSize(winW, totalH);
+    }
+    if (pos().x() != targetWinX) {
+        move(targetWinX, anchorPos.y());
+    }
+
+    updateSearchInputGeometry();
+    m_popupWidget->setGeometry(0, kBarHeight + kPopupGap, popW, popH);
 }
 
 void DesktopSearchBar::updatePreviewForResult(const search::FileSearchResult& result) {
     if (!m_popupWidget || !m_popupWidget->isPreviewVisible()) {
         return;
     }
-    const QString preview = m_searchEngine.fetchDocumentPreviewText(result.id, result.path, 500);
+    const QString preview = m_searchEngine.fetchDocumentPreviewText(result.id, result.path, 550);
     m_popupWidget->setPreviewText(preview);
 }
 
@@ -466,11 +532,11 @@ void DesktopSearchBar::onSearchTextChanged(const QString& text) {
         }
         ++m_queryGeneration;
         m_popupWidget->clearResults();
-        m_searchEdit->setGeometry(50, 10, kBarWidth - 50 - 105, 32);
         setPopupExpanded(false);
+        updateSearchInputGeometry();
     } else {
-        m_searchEdit->setGeometry(50, 10, kBarWidth - 50 - 46, 32);
         setPopupExpanded(true);
+        updateSearchInputGeometry();
         dispatchAsyncSearch(trimmed);
     }
     update();
@@ -545,18 +611,20 @@ void DesktopSearchBar::bindScreenSignals() {
 
 void DesktopSearchBar::onScreenConfigurationChanged() {
     auto& settings = core::SettingsManager::instance();
+    const QPoint currentAnchor = QPoint(pos().x() + m_expandedXShift, pos().y());
+    QPoint nextAnchor;
     if (settings.hasCustomPosition()) {
-        const QPoint clamped = clampPositionToScreens(pos());
-        if (clamped != pos()) {
-            move(clamped);
-        }
+        nextAnchor = clampPositionToScreens(currentAnchor);
     } else {
-        move(computeDefaultDesktopPosition());
+        nextAnchor = computeDefaultDesktopPosition();
     }
-}
-
-QRectF DesktopSearchBar::clearButtonHitRect() const {
-    return QRectF(kBarWidth - 38.0, 14.0, 24.0, 24.0);
+    m_collapsedAnchorPos = nextAnchor;
+    if (m_popupExpanded) {
+        move(nextAnchor.x() - m_expandedXShift, nextAnchor.y());
+        updateExpandedGeometry();
+    } else if (pos() != nextAnchor) {
+        move(nextAnchor);
+    }
 }
 
 void DesktopSearchBar::paintEvent(QPaintEvent* /*event*/) {
@@ -565,49 +633,57 @@ void DesktopSearchBar::paintEvent(QPaintEvent* /*event*/) {
     painter.setRenderHint(QPainter::TextAntialiasing, true);
 
     const auto theme = ThemeTokens::get(m_darkTheme);
-    const QRectF barBounds(1.0, 1.0, kBarWidth - 2.0, kBarHeight - 2.0);
-    const qreal radius = 14.0;
+    const QRectF barBounds = barShellRect();
+    const qreal radius = 12.0;
 
-    // Soft elevated shadow
+    // Understated soft shadow
     painter.setPen(Qt::NoPen);
     painter.setBrush(theme.shadowColor);
-    painter.drawRoundedRect(barBounds.adjusted(0.0, 2.0, 0.0, 2.0), radius, radius);
+    painter.drawRoundedRect(barBounds.adjusted(0.0, 1.5, 0.0, 1.5), radius, radius);
 
-    // Surface and interactive focus border
-    const bool hasFocus = m_isSearchActive || m_searchEdit->hasFocus();
-    const QColor borderColor = hasFocus ? theme.brandPink : theme.borderColor;
-    QPen borderPen(borderColor, hasFocus ? 1.6 : 1.0);
+    // Surface and restrained focus border
+    const bool hasFocus = m_isSearchActive || m_searchEdit->hasFocus() || m_popupExpanded;
+    const QColor borderColor = hasFocus ? theme.brandPinkBorder : theme.borderColor;
+    QPen borderPen(borderColor, hasFocus ? 1.4 : 1.0);
     painter.setPen(borderPen);
     painter.setBrush(theme.surfaceBackground);
-    painter.drawRoundedRect(barBounds.adjusted(0.0, 0.0, 0.0, -1.0), radius, radius);
+    painter.drawRoundedRect(barBounds.adjusted(0.0, 0.0, 0.0, -0.5), radius, radius);
 
-    // Left Lumen mark in Downshift pink gradient
-    const QRectF iconRect(14.0, 14.0, 24.0, 24.0);
-    BrandingIcon::paintLumenMark(&painter, iconRect, m_darkTheme);
+    // Refined minimal search icon on the left (no oversized gradient block)
+    const QRectF iconRect(barBounds.left() + 14.0, barBounds.top() + 16.0, 16.0, 16.0);
+    const QColor iconColor = hasFocus ? theme.brandPink : theme.textSecondary;
+    BrandingIcon::paintSearchIcon(&painter, iconRect, iconColor, 1.6);
 
     if (!m_searchEdit->text().isEmpty()) {
+        // Subtle clear '×' action on the right
         const QRectF clearRect = clearButtonHitRect();
         painter.setPen(Qt::NoPen);
-        painter.setBrush(theme.brandPinkTint);
+        painter.setBrush(theme.hoverSurface);
         painter.drawEllipse(clearRect);
 
-        QPen xPen(theme.brandPink, 1.6);
+        QPen xPen(theme.textSecondary, 1.4);
         xPen.setCapStyle(Qt::RoundCap);
         painter.setPen(xPen);
         const QPointF c = clearRect.center();
-        constexpr qreal d = 4.0;
+        constexpr qreal d = 3.5;
         painter.drawLine(QPointF(c.x() - d, c.y() - d), QPointF(c.x() + d, c.y() + d));
         painter.drawLine(QPointF(c.x() + d, c.y() - d), QPointF(c.x() - d, c.y() + d));
     } else {
-        const QRectF pillRect(kBarWidth - 100.0, 14.0, 86.0, 24.0);
-        painter.setPen(QPen(theme.borderColor, 1.0));
-        painter.setBrush(theme.elevatedBackground);
-        painter.drawRoundedRect(pillRect, 7.0, 7.0);
+        // Understated keyboard shortcut hint on the right
+        const QString shortcutText = core::SettingsManager::instance().globalShortcut();
+        const QFont hintFont = ThemeTokens::makeFont(11, QFont::Medium);
+        painter.setFont(hintFont);
+        const QFontMetrics fm(hintFont);
+        const int textW = fm.horizontalAdvance(shortcutText);
+        const int pillW = qBound(48, textW + 14, 92);
+        const QRectF pillRect(barBounds.right() - pillW - 12.0, barBounds.top() + 14.0, pillW, 22.0);
 
-        QFont pillFont(QStringLiteral("Segoe UI"), 8, QFont::Medium);
-        painter.setFont(pillFont);
-        painter.setPen(theme.textSecondary);
-        painter.drawText(pillRect, Qt::AlignCenter, core::SettingsManager::instance().globalShortcut());
+        painter.setPen(QPen(theme.borderSubtle, 1.0));
+        painter.setBrush(theme.elevatedBackground);
+        painter.drawRoundedRect(pillRect, 5.0, 5.0);
+
+        painter.setPen(theme.textMuted);
+        painter.drawText(pillRect, Qt::AlignCenter, shortcutText);
     }
 }
 
@@ -634,10 +710,11 @@ void DesktopSearchBar::mousePressEvent(QMouseEvent* event) {
             return;
         }
 
-        if (localPos.y() <= kBarHeight) {
+        if (barShellRect().contains(localPos)) {
             m_dragging = true;
             m_dragMoved = false;
-            m_dragOffset = event->globalPosition().toPoint() - frameGeometry().topLeft();
+            const QPoint currentAnchor(pos().x() + m_expandedXShift, pos().y());
+            m_dragOffset = event->globalPosition().toPoint() - currentAnchor;
             m_isSearchActive = true;
             const HWND hwnd = reinterpret_cast<HWND>(winId());
             platform::windows::DesktopIntegration::activateForSearchInput(hwnd);
@@ -652,10 +729,17 @@ void DesktopSearchBar::mousePressEvent(QMouseEvent* event) {
 
 void DesktopSearchBar::mouseMoveEvent(QMouseEvent* event) {
     if (m_dragging && (event->buttons() & Qt::LeftButton)) {
-        const QPoint newPos = clampPositionToScreens(event->globalPosition().toPoint() - m_dragOffset);
-        if ((newPos - pos()).manhattanLength() >= 2) {
+        const QPoint currentAnchor(pos().x() + m_expandedXShift, pos().y());
+        const QPoint newAnchor = clampPositionToScreens(event->globalPosition().toPoint() - m_dragOffset);
+        if ((newAnchor - currentAnchor).manhattanLength() >= 2) {
             m_dragMoved = true;
-            move(newPos);
+            m_collapsedAnchorPos = newAnchor;
+            if (m_popupExpanded) {
+                move(newAnchor.x() - m_expandedXShift, newAnchor.y());
+                updateExpandedGeometry();
+            } else {
+                move(newAnchor);
+            }
         }
         event->accept();
         return;
@@ -667,10 +751,17 @@ void DesktopSearchBar::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton && m_dragging) {
         m_dragging = false;
         if (m_dragMoved) {
-            const QPoint finalPos = clampPositionToScreens(pos());
-            move(finalPos);
-            core::SettingsManager::instance().setDesktopBarPosition(finalPos, true);
-            emit positionPersisted(finalPos);
+            const QPoint currentAnchor(pos().x() + m_expandedXShift, pos().y());
+            const QPoint finalAnchor = clampPositionToScreens(currentAnchor);
+            m_collapsedAnchorPos = finalAnchor;
+            if (m_popupExpanded) {
+                move(finalAnchor.x() - m_expandedXShift, finalAnchor.y());
+                updateExpandedGeometry();
+            } else {
+                move(finalAnchor);
+            }
+            core::SettingsManager::instance().setDesktopBarPosition(finalAnchor, true);
+            emit positionPersisted(finalAnchor);
         }
         event->accept();
         return;
@@ -805,8 +896,8 @@ bool DesktopSearchBar::nativeEvent(const QByteArray& eventType, void* message, q
 
         if (msg->message == platform::windows::DesktopIntegration::taskbarCreatedMessageId() &&
             msg->message != 0) {
-            core::Logger::info(QStringLiteral("Desktop"),
-                               QStringLiteral("Windows Explorer taskbar recreated; restoring desktop widget styles."));
+            core::Logger::info(QStringLiteral("Platform"),
+                               QStringLiteral("Windows Explorer restart detected (TaskbarCreated). Restoring desktop z-order."));
             const HWND hwnd = reinterpret_cast<HWND>(winId());
             platform::windows::DesktopIntegration::applyDesktopWidgetStyles(hwnd);
             if (!m_isSearchActive) {
@@ -816,60 +907,26 @@ bool DesktopSearchBar::nativeEvent(const QByteArray& eventType, void* message, q
             return false;
         }
 
-        switch (msg->message) {
-            case WM_MOUSEACTIVATE: {
-                m_isSearchActive = true;
-                if (result) {
-                    *result = MA_ACTIVATE;
-                }
-                return true;
+        if (msg->message == WM_HOTKEY &&
+            static_cast<int>(msg->wParam) == platform::windows::DesktopIntegration::kDefaultHotkeyId) {
+            activateAndFocusSearch();
+            if (result) {
+                *result = 0;
             }
-            case WM_ACTIVATE: {
-                const WORD state = LOWORD(msg->wParam);
-                if (state == WA_INACTIVE) {
-                    collapsePopupAndDeactivate(false);
-                } else {
-                    m_isSearchActive = true;
-                    update();
-                }
-                break;
+            return true;
+        }
+
+        if (msg->message == WM_WINDOWPOSCHANGING && !m_alwaysOnTop && !m_isSearchActive && !m_keepAboveShellTemp) {
+            auto* wp = reinterpret_cast<WINDOWPOS*>(msg->lParam);
+            if (wp != nullptr && (wp->flags & SWP_NOZORDER) == 0) {
+                wp->hwndInsertAfter = HWND_BOTTOM;
             }
-            case WM_WINDOWPOSCHANGING: {
-                WINDOWPOS* wp = reinterpret_cast<WINDOWPOS*>(msg->lParam);
-                if (wp != nullptr && !m_isSearchActive && !m_keepAboveShellTemp && !m_alwaysOnTop) {
-                    wp->hwndInsertAfter = HWND_BOTTOM;
-                }
-                break;
+        }
+
+        if (msg->message == WM_ACTIVATEAPP && msg->wParam == FALSE) {
+            if (m_isSearchActive || m_popupExpanded) {
+                collapsePopupAndDeactivate(false);
             }
-            case WM_SYSCOMMAND: {
-                if ((msg->wParam & 0xFFF0) == SC_MINIMIZE) {
-                    if (result) {
-                        *result = 0;
-                    }
-                    return true;
-                }
-                break;
-            }
-            case WM_HOTKEY: {
-                if (static_cast<int>(msg->wParam) == platform::windows::DesktopIntegration::kDefaultHotkeyId) {
-                    if (isVisible() && m_isSearchActive && m_searchEdit->hasFocus()) {
-                        collapsePopupAndDeactivate(false);
-                    } else {
-                        activateAndFocusSearch();
-                    }
-                    if (result) {
-                        *result = 0;
-                    }
-                    return true;
-                }
-                break;
-            }
-            case WM_DPICHANGED: {
-                onScreenConfigurationChanged();
-                break;
-            }
-            default:
-                break;
         }
     }
     return QWidget::nativeEvent(eventType, message, result);

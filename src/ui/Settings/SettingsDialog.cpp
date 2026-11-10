@@ -4,84 +4,202 @@
 #include "core/SettingsManager.h"
 #include "database/DatabaseManager.h"
 #include "ui/BrandingIcon.h"
+#include "ui/Theme.h"
 
+#include <QCheckBox>
 #include <QDir>
 #include <QFileDialog>
-#include <QFormLayout>
-#include <QGroupBox>
+#include <QFrame>
+#include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QPainter>
+#include <QPainterPath>
+#include <QProxyStyle>
 #include <QPushButton>
+#include <QStyleFactory>
+#include <QStyleHints>
+#include <QStyleOptionButton>
 #include <QVBoxLayout>
 
 namespace lumen::ui {
 
+namespace {
+class LumenSettingsStyle : public QProxyStyle {
+public:
+    explicit LumenSettingsStyle(bool dark)
+        : QProxyStyle(QStyleFactory::create(QStringLiteral("Fusion"))),
+          m_dark(dark) {}
+
+    void setDark(bool dark) { m_dark = dark; }
+
+    void drawPrimitive(PrimitiveElement element,
+                       const QStyleOption* option,
+                       QPainter* painter,
+                       const QWidget* widget = nullptr) const override {
+        if (element == PE_IndicatorCheckBox) {
+            painter->save();
+            painter->setRenderHint(QPainter::Antialiasing, true);
+
+            const auto theme = ThemeTokens::get(m_dark);
+            const QRectF r = QRectF(option->rect).adjusted(1.0, 1.0, -1.0, -1.0);
+            const bool checked = (option->state & State_On) != 0;
+            const bool hovered = (option->state & State_MouseOver) != 0;
+
+            if (checked) {
+                painter->setPen(QPen(theme.brandPink, 1.0));
+                painter->setBrush(theme.brandPink);
+                painter->drawRoundedRect(r, 4.0, 4.0);
+
+                // Crisp white checkmark
+                QPainterPath check;
+                check.moveTo(r.left() + r.width() * 0.24, r.top() + r.height() * 0.52);
+                check.lineTo(r.left() + r.width() * 0.44, r.top() + r.height() * 0.72);
+                check.lineTo(r.left() + r.width() * 0.76, r.top() + r.height() * 0.30);
+                QPen checkPen(QColor(255, 255, 255), 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+                painter->setPen(checkPen);
+                painter->setBrush(Qt::NoBrush);
+                painter->drawPath(check);
+            } else {
+                painter->setPen(QPen(hovered ? theme.brandPink : theme.borderColor, 1.2));
+                painter->setBrush(theme.surfaceBackground);
+                painter->drawRoundedRect(r, 4.0, 4.0);
+            }
+
+            painter->restore();
+            return;
+        }
+        QProxyStyle::drawPrimitive(element, option, painter, widget);
+    }
+
+private:
+    bool m_dark = false;
+};
+
+QLabel* createSectionHeader(const QString& title, QWidget* parent) {
+    auto* lbl = new QLabel(title, parent);
+    lbl->setObjectName(QStringLiteral("sectionHeader"));
+    lbl->setFont(ThemeTokens::makeFont(14, QFont::DemiBold, true));
+    return lbl;
+}
+
+QFrame* createSectionDivider(QWidget* parent) {
+    auto* line = new QFrame(parent);
+    line->setObjectName(QStringLiteral("sectionDivider"));
+    line->setFrameShape(QFrame::HLine);
+    line->setFixedHeight(1);
+    return line;
+}
+
+QHBoxLayout* createLabeledControlRow(const QString& labelText, QWidget* control, QWidget* parent) {
+    auto* row = new QHBoxLayout();
+    row->setContentsMargins(0, 0, 0, 0);
+    row->setSpacing(12);
+    auto* lbl = new QLabel(labelText, parent);
+    lbl->setObjectName(QStringLiteral("rowLabel"));
+    lbl->setFont(ThemeTokens::makeFont(13, QFont::Normal));
+    row->addWidget(lbl);
+    row->addStretch();
+    row->addWidget(control);
+    return row;
+}
+} // namespace
+
 SettingsDialog::SettingsDialog(QWidget* parent)
     : QDialog(parent) {
-    setWindowTitle(QStringLiteral("Lumen Settings — UshaLabs"));
+    setWindowTitle(QStringLiteral("Lumen Settings"));
     setWindowIcon(BrandingIcon::createAppIcon());
-    setMinimumWidth(470);
+    setFixedWidth(520);
     setModal(true);
 
     auto* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(18, 18, 18, 18);
-    mainLayout->setSpacing(12);
+    mainLayout->setContentsMargins(24, 22, 24, 20);
+    mainLayout->setSpacing(10);
 
-    // 1. Desktop Search Bar group
-    auto* desktopGroup = new QGroupBox(QStringLiteral("Desktop Search Bar"), this);
-    auto* desktopLayout = new QFormLayout(desktopGroup);
-    desktopLayout->setSpacing(8);
+    // -------------------------------------------------------------------------
+    // Section 1: General
+    // -------------------------------------------------------------------------
+    mainLayout->addWidget(createSectionHeader(QStringLiteral("General"), this));
 
-    m_desktopBarVisibleCheck = new QCheckBox(QStringLiteral("Show search bar on Windows desktop"), desktopGroup);
-    desktopLayout->addRow(QString(), m_desktopBarVisibleCheck);
+    m_desktopBarVisibleCheck = new QCheckBox(QStringLiteral("Show search bar on the Windows desktop"), this);
+    m_desktopBarVisibleCheck->setFont(ThemeTokens::makeFont(13, QFont::Normal));
+    mainLayout->addWidget(m_desktopBarVisibleCheck);
 
-    m_alwaysOnTopCheck = new QCheckBox(QStringLiteral("Floating Always-on-Top mode (stay above maximized windows)"), desktopGroup);
-    desktopLayout->addRow(QString(), m_alwaysOnTopCheck);
+    m_alwaysOnTopCheck = new QCheckBox(QStringLiteral("Floating mode (keep search bar above active windows)"), this);
+    m_alwaysOnTopCheck->setFont(ThemeTokens::makeFont(13, QFont::Normal));
+    mainLayout->addWidget(m_alwaysOnTopCheck);
 
-    m_startWithWindowsCheck = new QCheckBox(QStringLiteral("Start Lumen automatically when Windows starts"), desktopGroup);
-    desktopLayout->addRow(QString(), m_startWithWindowsCheck);
+    m_startWithWindowsCheck = new QCheckBox(QStringLiteral("Launch Lumen automatically when Windows starts"), this);
+    m_startWithWindowsCheck->setFont(ThemeTokens::makeFont(13, QFont::Normal));
+    mainLayout->addWidget(m_startWithWindowsCheck);
 
-    m_appearanceCombo = new QComboBox(desktopGroup);
-    m_appearanceCombo->addItem(QStringLiteral("Light (Default)"), QStringLiteral("light"));
-    m_appearanceCombo->addItem(QStringLiteral("Dark"), QStringLiteral("dark"));
-    m_appearanceCombo->addItem(QStringLiteral("Follow Windows System"), QStringLiteral("system"));
-    desktopLayout->addRow(QStringLiteral("Appearance:"), m_appearanceCombo);
-
-    m_shortcutEdit = new QLineEdit(desktopGroup);
+    m_shortcutEdit = new QLineEdit(this);
     m_shortcutEdit->setPlaceholderText(QStringLiteral("Ctrl+Alt+Space"));
-    desktopLayout->addRow(QStringLiteral("Global Shortcut:"), m_shortcutEdit);
+    m_shortcutEdit->setFixedWidth(180);
+    m_shortcutEdit->setFont(ThemeTokens::makeFont(13, QFont::Normal));
+    mainLayout->addLayout(createLabeledControlRow(QStringLiteral("Global activation shortcut"), m_shortcutEdit, this));
 
-    auto* resetPosBtn = new QPushButton(QStringLiteral("Reset Desktop Bar Position"), desktopGroup);
+    mainLayout->addSpacing(4);
+    mainLayout->addWidget(createSectionDivider(this));
+    mainLayout->addSpacing(2);
+
+    // -------------------------------------------------------------------------
+    // Section 2: Appearance
+    // -------------------------------------------------------------------------
+    mainLayout->addWidget(createSectionHeader(QStringLiteral("Appearance"), this));
+
+    m_appearanceCombo = new QComboBox(this);
+    m_appearanceCombo->addItem(QStringLiteral("Light"), QStringLiteral("light"));
+    m_appearanceCombo->addItem(QStringLiteral("Dark"), QStringLiteral("dark"));
+    m_appearanceCombo->addItem(QStringLiteral("System Default"), QStringLiteral("system"));
+    m_appearanceCombo->setFixedWidth(180);
+    m_appearanceCombo->setFont(ThemeTokens::makeFont(13, QFont::Normal));
+    connect(m_appearanceCombo, &QComboBox::currentIndexChanged, this, &SettingsDialog::onAppearanceChanged);
+    mainLayout->addLayout(createLabeledControlRow(QStringLiteral("Color theme"), m_appearanceCombo, this));
+
+    auto* resetPosBtn = new QPushButton(QStringLiteral("Reset to Default Position"), this);
+    resetPosBtn->setFixedWidth(180);
+    resetPosBtn->setFont(ThemeTokens::makeFont(12, QFont::Medium));
     connect(resetPosBtn, &QPushButton::clicked, this, &SettingsDialog::onResetPositionClicked);
-    desktopLayout->addRow(QStringLiteral("Placement:"), resetPosBtn);
+    mainLayout->addLayout(createLabeledControlRow(QStringLiteral("Desktop search bar placement"), resetPosBtn, this));
 
-    mainLayout->addWidget(desktopGroup);
+    mainLayout->addSpacing(4);
+    mainLayout->addWidget(createSectionDivider(this));
+    mainLayout->addSpacing(2);
 
-    // 2. Indexing Scope & Offline AI group
-    auto* indexGroup = new QGroupBox(QStringLiteral("Indexing Scope && Offline Intelligence"), this);
-    auto* indexLayout = new QVBoxLayout(indexGroup);
-    indexLayout->setSpacing(8);
+    // -------------------------------------------------------------------------
+    // Section 3: Search & Indexing
+    // -------------------------------------------------------------------------
+    mainLayout->addWidget(createSectionHeader(QStringLiteral("Search & Indexing"), this));
 
     m_enableContentCheck = new QCheckBox(
-        QStringLiteral("Index document contents (.txt, .md, .pdf, .docx)"), indexGroup);
-    indexLayout->addWidget(m_enableContentCheck);
+        QStringLiteral("Index document text (.txt, .md, .pdf, .docx)"), this);
+    m_enableContentCheck->setFont(ThemeTokens::makeFont(13, QFont::Normal));
+    mainLayout->addWidget(m_enableContentCheck);
 
     m_enableSemanticCheck = new QCheckBox(
-        QStringLiteral("Enable offline semantic AI embeddings (ONNX CPU MiniLM-L6-v2)"), indexGroup);
-    indexLayout->addWidget(m_enableSemanticCheck);
+        QStringLiteral("Enable offline semantic search (local MiniLM-L6-v2 embeddings)"), this);
+    m_enableSemanticCheck->setFont(ThemeTokens::makeFont(13, QFont::Normal));
+    mainLayout->addWidget(m_enableSemanticCheck);
 
-    auto* scopeCaption = new QLabel(
-        QStringLiteral("Monitored user folders:"),
-        indexGroup);
-    indexLayout->addWidget(scopeCaption);
+    auto* scopeCaption = new QLabel(QStringLiteral("Indexed folders"), this);
+    scopeCaption->setObjectName(QStringLiteral("subCaption"));
+    scopeCaption->setFont(ThemeTokens::makeFont(12, QFont::Medium));
+    mainLayout->addWidget(scopeCaption);
 
-    m_watchedFoldersList = new QListWidget(indexGroup);
-    m_watchedFoldersList->setMaximumHeight(82);
-    indexLayout->addWidget(m_watchedFoldersList);
+    m_watchedFoldersList = new QListWidget(this);
+    m_watchedFoldersList->setFixedHeight(88);
+    m_watchedFoldersList->setFont(ThemeTokens::makeFont(12, QFont::Normal));
+    mainLayout->addWidget(m_watchedFoldersList);
 
     auto* folderBtnRow = new QHBoxLayout();
-    auto* addFolderBtn = new QPushButton(QStringLiteral("Add Folder..."), indexGroup);
-    auto* removeFolderBtn = new QPushButton(QStringLiteral("Remove Selected"), indexGroup);
-    auto* rebuildBtn = new QPushButton(QStringLiteral("Rebuild Index"), indexGroup);
+    folderBtnRow->setContentsMargins(0, 0, 0, 0);
+    folderBtnRow->setSpacing(8);
+    auto* addFolderBtn = new QPushButton(QStringLiteral("Add Folder..."), this);
+    auto* removeFolderBtn = new QPushButton(QStringLiteral("Remove"), this);
+    auto* rebuildBtn = new QPushButton(QStringLiteral("Rebuild Index"), this);
+    addFolderBtn->setFont(ThemeTokens::makeFont(12, QFont::Medium));
+    removeFolderBtn->setFont(ThemeTokens::makeFont(12, QFont::Medium));
+    rebuildBtn->setFont(ThemeTokens::makeFont(12, QFont::Medium));
 
     connect(addFolderBtn, &QPushButton::clicked, this, &SettingsDialog::onAddFolderClicked);
     connect(removeFolderBtn, &QPushButton::clicked, this, &SettingsDialog::onRemoveFolderClicked);
@@ -91,26 +209,49 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     folderBtnRow->addWidget(removeFolderBtn);
     folderBtnRow->addStretch();
     folderBtnRow->addWidget(rebuildBtn);
-    indexLayout->addLayout(folderBtnRow);
+    mainLayout->addLayout(folderBtnRow);
 
-    m_dbStatusLabel = new QLabel(indexGroup);
-    m_dbStatusLabel->setStyleSheet(QStringLiteral("color: #64748B; font-size: 8.5pt;"));
+    mainLayout->addSpacing(4);
+    mainLayout->addWidget(createSectionDivider(this));
+    mainLayout->addSpacing(2);
+
+    // -------------------------------------------------------------------------
+    // Section 4: Storage & Privacy
+    // -------------------------------------------------------------------------
+    mainLayout->addWidget(createSectionHeader(QStringLiteral("Storage & Privacy"), this));
+
+    m_dbStatusLabel = new QLabel(this);
+    m_dbStatusLabel->setObjectName(QStringLiteral("metaLabel"));
+    m_dbStatusLabel->setFont(ThemeTokens::makeFont(12, QFont::Normal));
     m_dbStatusLabel->setWordWrap(true);
-    indexLayout->addWidget(m_dbStatusLabel);
+    mainLayout->addWidget(m_dbStatusLabel);
 
-    mainLayout->addWidget(indexGroup);
+    m_dbPathLabel = new QLabel(this);
+    m_dbPathLabel->setObjectName(QStringLiteral("mutedLabel"));
+    m_dbPathLabel->setFont(ThemeTokens::makeFont(11, QFont::Normal));
+    m_dbPathLabel->setWordWrap(true);
+    mainLayout->addWidget(m_dbPathLabel);
 
-    // 3. Dialog footer with UshaLabs signature & action buttons
+    mainLayout->addSpacing(6);
+    mainLayout->addWidget(createSectionDivider(this));
+    mainLayout->addSpacing(4);
+
+    // -------------------------------------------------------------------------
+    // Footer: Brand Signature & Save / Cancel Actions
+    // -------------------------------------------------------------------------
     auto* btnRow = new QHBoxLayout();
-    auto* signature = new QLabel(
-        QStringLiteral("<span style='font-size:16px;font-weight:600;font-style:italic;color:#172033'>Usha</span><span style='font-size:16px;font-weight:600;font-style:italic;color:#EC1680'>Labs</span>"),
-        this);
-    signature->setTextFormat(Qt::RichText);
-    btnRow->addWidget(signature);
+    btnRow->setContentsMargins(0, 0, 0, 0);
+    btnRow->setSpacing(8);
+
+    m_signatureLabel = new QLabel(this);
+    m_signatureLabel->setTextFormat(Qt::RichText);
+    btnRow->addWidget(m_signatureLabel);
     btnRow->addStretch();
 
     auto* cancelBtn = new QPushButton(QStringLiteral("Cancel"), this);
     auto* saveBtn = new QPushButton(QStringLiteral("Save Changes"), this);
+    cancelBtn->setFont(ThemeTokens::makeFont(12, QFont::Medium));
+    saveBtn->setFont(ThemeTokens::makeFont(12, QFont::DemiBold));
     saveBtn->setDefault(true);
 
     connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
@@ -120,27 +261,82 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     btnRow->addWidget(saveBtn);
     mainLayout->addLayout(btnRow);
 
-    setStyleSheet(QStringLiteral(
-        "QDialog { background-color: #F8F9FD; font-family: 'Segoe UI'; font-size: 9pt; color: #172033; }"
-        "QGroupBox { font-weight: 600; font-size: 9.5pt; color: #172033; border: 1px solid #DCE1EC; border-radius: 10px; margin-top: 10px; padding-top: 14px; background: #FFFFFF; }"
-        "QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 14px; padding: 0 4px; background: transparent; }"
-        "QPushButton { background: #FFFFFF; border: 1px solid #DCE1EC; border-radius: 8px; padding: 6px 14px; font-weight: 600; color: #172033; min-height: 20px; }"
-        "QPushButton:hover { background: #FDF2F8; border-color: #EC1680; color: #EC1680; }"
-        "QPushButton:pressed { background: #FBE4EF; }"
-        "QPushButton:default { background: #EC1680; color: #FFFFFF; border-color: #EC1680; }"
-        "QPushButton:default:hover { background: #D90C70; }"
-        "QPushButton:default:pressed { background: #BA0B62; }"
-        "QLineEdit, QComboBox { background: #FFFFFF; border: 1px solid #DCE1EC; border-radius: 8px; padding: 5px 8px; color: #172033; selection-background-color: #EC1680; selection-color: white; }"
-        "QLineEdit:focus, QComboBox:focus { border-color: #EC1680; }"
-        "QCheckBox { spacing: 8px; font-size: 9pt; color: #172033; }"
-        "QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #DCE1EC; background: #FFFFFF; }"
-        "QCheckBox::indicator:hover { border-color: #EC1680; }"
-        "QCheckBox::indicator:checked { background: #EC1680; border-color: #EC1680; }"
-        "QListWidget { background: #FAFBFD; border: 1px solid #DCE1EC; border-radius: 8px; padding: 4px; color: #172033; }"
-        "QListWidget::item { padding: 4px; border-radius: 4px; }"
-        "QListWidget::item:selected { background: #FBE4EF; color: #EC1680; }"));
-
     loadFromSettings();
+}
+
+void SettingsDialog::applyThemeStyles(bool dark) {
+    const auto theme = ThemeTokens::get(dark);
+
+    for (auto* cb : {m_desktopBarVisibleCheck, m_alwaysOnTopCheck, m_startWithWindowsCheck, m_enableContentCheck, m_enableSemanticCheck}) {
+        if (cb != nullptr) {
+            cb->setStyle(new LumenSettingsStyle(dark));
+        }
+    }
+
+    m_signatureLabel->setText(
+        QStringLiteral("<span style='font-size:13px;font-weight:600;color:%1'>Usha</span>"
+                       "<span style='font-size:13px;font-weight:600;color:%2'>Labs</span>"
+                       "<span style='font-size:11px;color:%3'>  ·  100% Offline</span>")
+            .arg(theme.textPrimary.name(), theme.brandPink.name(), theme.textMuted.name()));
+
+    setStyleSheet(QStringLiteral(
+        "QDialog { background-color: %1; color: %2; }"
+        "QLabel#sectionHeader { color: %2; padding-top: 2px; padding-bottom: 2px; }"
+        "QLabel#rowLabel { color: %2; }"
+        "QLabel#subCaption { color: %3; padding-top: 2px; }"
+        "QLabel#metaLabel { color: %3; }"
+        "QLabel#mutedLabel { color: %4; }"
+        "QFrame#sectionDivider { background-color: %5; border: none; }"
+        "QPushButton {"
+        "  background-color: %6;"
+        "  border: 1px solid %7;"
+        "  border-radius: 6px;"
+        "  padding: 5px 12px;"
+        "  color: %2;"
+        "  min-height: 18px;"
+        "}"
+        "QPushButton:hover { background-color: %8; border-color: %9; color: %9; }"
+        "QPushButton:pressed { background-color: %10; }"
+        "QPushButton:default { background-color: %9; color: #FFFFFF; border-color: %9; }"
+        "QPushButton:default:hover { background-color: %11; border-color: %11; color: #FFFFFF; }"
+        "QLineEdit, QComboBox {"
+        "  background-color: %6;"
+        "  border: 1px solid %7;"
+        "  border-radius: 6px;"
+        "  padding: 4px 8px;"
+        "  color: %2;"
+        "  selection-background-color: %9;"
+        "  selection-color: #FFFFFF;"
+        "}"
+        "QLineEdit:focus, QComboBox:focus { border-color: %9; }"
+        "QComboBox::drop-down { border: none; width: 20px; }"
+        "QComboBox QAbstractItemView { background-color: %6; color: %2; border: 1px solid %7; selection-background-color: %10; selection-color: %9; }"
+        "QCheckBox { spacing: 8px; color: %2; padding: 2px 0px; }"
+        "QListWidget { background-color: %6; border: 1px solid %7; border-radius: 6px; padding: 4px; color: %2; outline: none; }"
+        "QListWidget::item { padding: 3px 6px; border-radius: 4px; }"
+        "QListWidget::item:selected { background-color: %10; color: %2; }")
+        .arg(theme.windowBackground.name(),
+             theme.textPrimary.name(),
+             theme.textSecondary.name(),
+             theme.textMuted.name(),
+             theme.borderSubtle.name(),
+             theme.surfaceBackground.name(),
+             theme.borderColor.name(),
+             theme.hoverSurface.name(),
+             theme.brandPink.name(),
+             theme.brandPinkSelected.name(),
+             theme.brandPinkHover.name()));
+}
+
+void SettingsDialog::onAppearanceChanged() {
+    const QString pref = m_appearanceCombo->currentData().toString().toLower();
+    bool dark = false;
+    if (pref == QStringLiteral("dark")) {
+        dark = true;
+    } else if (pref == QStringLiteral("system")) {
+        dark = (QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark);
+    }
+    applyThemeStyles(dark);
 }
 
 void SettingsDialog::loadFromSettings() {
@@ -165,18 +361,20 @@ void SettingsDialog::loadFromSettings() {
     }
 
     refreshDbStatusLabel();
+    onAppearanceChanged();
 }
 
 void SettingsDialog::refreshDbStatusLabel() {
     auto& db = database::DatabaseManager::instance();
     m_dbStatusLabel->setText(
-        QStringLiteral("Indexed Files: %1  •  Content Docs: %2  •  Semantic Chunks: %3\nDB: %4 (Schema v%5, WAL: %6)")
+        QStringLiteral("%1 indexed files   ·   %2 content documents   ·   %3 semantic chunks")
             .arg(db.fileCount())
             .arg(db.documentContentCount())
-            .arg(db.documentChunkCount())
-            .arg(core::AppPaths::databaseFilePath())
-            .arg(db.schemaVersion())
-            .arg(db.journalMode()));
+            .arg(db.documentChunkCount()));
+    m_dbPathLabel->setText(
+        QStringLiteral("Local database: %1 (SQLite WAL, Schema v%2)")
+            .arg(QDir::toNativeSeparators(core::AppPaths::databaseFilePath()))
+            .arg(db.schemaVersion()));
 }
 
 void SettingsDialog::onResetPositionClicked() {

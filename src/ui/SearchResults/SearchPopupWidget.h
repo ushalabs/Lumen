@@ -50,10 +50,10 @@ class SearchPopupWidget : public QWidget {
     Q_OBJECT
 
 public:
-    static constexpr int kHeaderHeight = 34;
-    static constexpr int kRowHeight = 54;
-    static constexpr int kContentRowHeight = 72;
-    static constexpr int kPreviewHeight = 112;
+    static constexpr int kHeaderHeight = 36;
+    static constexpr int kRowHeight = 60;
+    static constexpr int kContentRowHeight = 76;
+    static constexpr int kPreviewHeight = 148;
     static constexpr int kFooterHeight = 28;
     static constexpr int kMaxVisibleRows = 6;
 
@@ -118,6 +118,8 @@ private:
     void showContextMenuAt(const QPoint& localPos, const search::FileSearchResult& item);
     QRectF modePillRect(int modeIndex) const;
     QRectF previewToggleRect() const;
+    QRectF previewOpenButtonRect(const QRectF& previewPaneRect) const;
+    QRectF previewRevealButtonRect(const QRectF& previewPaneRect) const;
 
     QString m_queryText;
     QString m_previewText;

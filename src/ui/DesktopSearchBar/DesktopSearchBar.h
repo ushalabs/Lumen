@@ -20,6 +20,7 @@ class DesktopSearchBar : public QWidget {
 public:
     static constexpr int kBarWidth = 460;
     static constexpr int kBarHeight = 52;
+    static constexpr int kPopupWidth = 620;
     static constexpr int kPopupGap = 6;
     static constexpr int kPopupHeight = 132;
     static constexpr int kExpandedHeight = kBarHeight + kPopupGap + kPopupHeight;
@@ -84,11 +85,13 @@ private slots:
 private:
     void setPopupExpanded(bool expanded);
     void updateExpandedGeometry();
+    void updateSearchInputGeometry();
     void dispatchAsyncSearch(const QString& trimmedQuery);
     void dispatchRelatedDocumentsSearch(const search::FileSearchResult& sourceResult);
     void updatePreviewForResult(const search::FileSearchResult& result);
     void applyRestingWindowZOrder();
     void bindScreenSignals();
+    QRectF barShellRect() const;
     QRectF clearButtonHitRect() const;
 
     QLineEdit* m_searchEdit = nullptr;
@@ -106,6 +109,8 @@ private:
     bool m_dragging = false;
     bool m_dragMoved = false;
     QPoint m_dragOffset;
+    QPoint m_collapsedAnchorPos;
+    int m_expandedXShift = 0;
 
     bool m_darkTheme = false;
     bool m_hotkeyRegistered = false;

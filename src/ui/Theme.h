@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QColor>
+#include <QFont>
 #include <QString>
 
 namespace lumen::ui {
@@ -8,6 +9,7 @@ namespace lumen::ui {
 struct ThemeTokens {
     // Primary brand identity (Downshift Pink/Magenta)
     QColor brandPink;
+    QColor brandPinkHover;
     QColor brandPinkLight;
     QColor brandPinkTint;
     QColor brandPinkSelected;
@@ -22,11 +24,21 @@ struct ThemeTokens {
     QColor surfaceBackground;
     QColor elevatedBackground;
     QColor windowBackground;
+    QColor hoverSurface;
     QColor borderColor;
     QColor borderSubtle;
     QColor shadowColor;
 
-    // Badge styling for file formats
+    // Subtle file icon stroke/accent colors
+    QColor iconPrimary;
+    QColor iconSecondary;
+    QColor iconAccentPdf;
+    QColor iconAccentDoc;
+    QColor iconAccentSheet;
+    QColor iconAccentCode;
+    QColor iconAccentImage;
+
+    // Legacy compatibility tokens (kept restrained)
     QColor badgePdfBg;
     QColor badgePdfText;
     QColor badgeDocBg;
@@ -39,8 +51,6 @@ struct ThemeTokens {
     QColor badgeSheetText;
     QColor badgeImageBg;
     QColor badgeImageText;
-
-    // Feature indicator pills
     QColor semanticBadgeBg;
     QColor semanticBadgeText;
     QColor contentBadgeBg;
@@ -49,6 +59,9 @@ struct ThemeTokens {
     QColor pinnedBadgeText;
 
     static ThemeTokens get(bool dark);
+
+    // Creates a native Windows font preferring Segoe UI Variable with pixel sizing
+    static QFont makeFont(int pixelSize, QFont::Weight weight = QFont::Normal, bool display = false);
 };
 
 } // namespace lumen::ui

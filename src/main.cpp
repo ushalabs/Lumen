@@ -1,4 +1,5 @@
 #include "app/LumenApplication.h"
+#include "core/SettingsManager.h"
 #include "database/DatabaseManager.h"
 #include "platform/windows/DesktopIntegration.h"
 #include "platform/windows/SingleInstanceGuard.h"
@@ -84,12 +85,17 @@ int main(int argc, char* argv[]) {
                 dir.mkpath(QStringLiteral("."));
             }
             if (auto* bar = lumenApp.desktopSearchBar()) {
+                const QString origTheme = lumen::core::SettingsManager::instance().appearancePreference();
+                lumen::core::SettingsManager::instance().setAppearancePreference(QStringLiteral("light"), false);
+                bar->refreshAppearanceFromSettings();
+
                 bar->show();
                 bar->collapsePopupAndDeactivate(true);
                 QCoreApplication::processEvents();
-                bar->grab().save(dir.filePath(QStringLiteral("phase0_desktop_bar_idle.png")));
+                const QPixmap idleGrab = bar->grab();
+                idleGrab.save(dir.filePath(QStringLiteral("desktop_search_bar.png")));
+                idleGrab.save(dir.filePath(QStringLiteral("phase0_desktop_bar_idle.png")));
 
-                // Ensure sample records exist to render Phase 1, Phase 2, Phase 3 & Phase 4 live search results screenshots
                 auto& db = lumen::database::DatabaseManager::instance();
                 db.clearAllFiles();
                 const qint64 now = QDateTime::currentSecsSinceEpoch();
@@ -123,7 +129,6 @@ int main(int argc, char* argv[]) {
                 }
                 db.upsertDocumentContentBatch(docContents);
 
-                // Generate real semantic embeddings for the sample documents
                 const auto semCandidates = db.queryCandidatesForSemanticIndexing(10);
                 QVector<qint64> fileIdsToClear;
                 QVector<lumen::database::DocumentChunkRecord> chunkRecords;
@@ -152,36 +157,65 @@ int main(int argc, char* argv[]) {
                 bar->activateAndFocusSearch();
                 bar->setSearchText(QStringLiteral("report"));
 
-                QTimer::singleShot(180, &qApp[0], [bar, dir]() {
+                QTimer::singleShot(180, &qApp[0], [bar, dir, origTheme]() {
                     QCoreApplication::processEvents();
-                    bar->grab().save(dir.filePath(QStringLiteral("phase1_desktop_search_results.png")));
+                    const QPixmap fileGrab = bar->grab();
+                    fileGrab.save(dir.filePath(QStringLiteral("filename_search.png")));
+                    fileGrab.save(dir.filePath(QStringLiteral("phase1_desktop_search_results.png")));
+
+                    if (bar->popupWidget()) {
+                        bar->popupWidget()->selectNext();
+                        QCoreApplication::processEvents();
+                        bar->grab().save(dir.filePath(QStringLiteral("selected_result_state.png")));
+                        bar->popupWidget()->selectPrevious();
+                    }
 
                     bar->setSearchText(QStringLiteral("enterprise licensing"));
-                    QTimer::singleShot(180, &qApp[0], [bar, dir]() {
+                    QTimer::singleShot(180, &qApp[0], [bar, dir, origTheme]() {
                         QCoreApplication::processEvents();
-                        bar->grab().save(dir.filePath(QStringLiteral("phase2_content_search_results.png")));
+                        const QPixmap contentGrab = bar->grab();
+                        contentGrab.save(dir.filePath(QStringLiteral("document_content_search.png")));
+                        contentGrab.save(dir.filePath(QStringLiteral("phase2_content_search_results.png")));
 
-                        // Natural-language semantic query with zero exact keyword overlap
                         bar->setSearchText(QStringLiteral("company financial earnings growth"));
-                        QTimer::singleShot(250, &qApp[0], [bar, dir]() {
+                        QTimer::singleShot(250, &qApp[0], [bar, dir, origTheme]() {
                             QCoreApplication::processEvents();
-                            bar->grab().save(dir.filePath(QStringLiteral("phase3_semantic_search_results.png")));
+                            const QPixmap semGrab = bar->grab();
+                            semGrab.save(dir.filePath(QStringLiteral("semantic_search.png")));
+                            semGrab.save(dir.filePath(QStringLiteral("phase3_semantic_search_results.png")));
 
-                            // Phase 4: Toggle Quick Preview pane on the top semantic result
                             if (bar->popupWidget()) {
                                 bar->popupWidget()->setPreviewVisible(true);
                             }
-                            QTimer::singleShot(180, &qApp[0], [bar, dir]() {
+                            QTimer::singleShot(180, &qApp[0], [bar, dir, origTheme]() {
                                 QCoreApplication::processEvents();
-                                bar->grab().save(dir.filePath(QStringLiteral("phase4_quick_preview_and_modes.png")));
+                                const QPixmap prevGrab = bar->grab();
+                                prevGrab.save(dir.filePath(QStringLiteral("quick_preview_and_modes.png")));
+                                prevGrab.save(dir.filePath(QStringLiteral("phase4_quick_preview_and_modes.png")));
+
+                                // Capture Dark Theme search state
+                                if (bar->popupWidget()) {
+                                    bar->popupWidget()->setPreviewVisible(false);
+                                }
+                                lumen::core::SettingsManager::instance().setAppearancePreference(QStringLiteral("dark"), false);
+                                bar->refreshAppearanceFromSettings();
+                                QCoreApplication::processEvents();
+                                bar->grab().save(dir.filePath(QStringLiteral("dark_theme_search.png")));
+
+                                // Restore Light theme and capture SettingsDialog
+                                lumen::core::SettingsManager::instance().setAppearancePreference(QStringLiteral("light"), false);
+                                bar->refreshAppearanceFromSettings();
                                 bar->collapsePopupAndDeactivate(true);
 
                                 lumen::ui::SettingsDialog settingsDlg;
                                 settingsDlg.show();
                                 QCoreApplication::processEvents();
-                                settingsDlg.grab().save(dir.filePath(QStringLiteral("phase0_settings_dialog.png")));
+                                const QPixmap settingsGrab = settingsDlg.grab();
+                                settingsGrab.save(dir.filePath(QStringLiteral("settings_dialog.png")));
+                                settingsGrab.save(dir.filePath(QStringLiteral("phase0_settings_dialog.png")));
                                 settingsDlg.hide();
 
+                                lumen::core::SettingsManager::instance().setAppearancePreference(origTheme, false);
                                 lumen::semantic::SemanticEmbeddingEngine::instance().unloadModel();
                                 lumen::database::DatabaseManager::instance().clearAllFiles();
                                 QCoreApplication::quit();

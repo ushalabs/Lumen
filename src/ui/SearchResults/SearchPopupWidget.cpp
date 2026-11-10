@@ -2,6 +2,7 @@
 
 #include "core/SettingsManager.h"
 #include "database/DatabaseManager.h"
+#include "ui/BrandingIcon.h"
 #include "ui/Theme.h"
 
 #include <QClipboard>
@@ -36,56 +37,116 @@ QString formatHumanSize(qint64 bytes) {
     return QStringLiteral("%1 GB").arg(static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0), 0, 'f', 2);
 }
 
-QColor extensionBadgeColor(const QString& extLower, const ThemeTokens& theme) {
-    if (extLower == QStringLiteral("pdf")) {
-        return theme.badgePdfBg;
+QString formatBreadcrumbPath(const QString& rawParentDir) {
+    if (rawParentDir.isEmpty()) {
+        return QString();
     }
-    if (extLower == QStringLiteral("doc") || extLower == QStringLiteral("docx")) {
-        return theme.badgeDocBg;
+    QString clean = QDir::fromNativeSeparators(rawParentDir);
+    const QString home = QDir::fromNativeSeparators(QDir::homePath());
+    if (!home.isEmpty() && clean.startsWith(home, Qt::CaseInsensitive)) {
+        clean = clean.mid(home.size());
+        while (clean.startsWith(QLatin1Char('/'))) {
+            clean.remove(0, 1);
+        }
+        if (clean.isEmpty()) {
+            return QStringLiteral("Home");
+        }
     }
-    if (extLower == QStringLiteral("txt") || extLower == QStringLiteral("md")) {
-        return theme.badgeTxtBg;
-    }
-    if (extLower == QStringLiteral("xls") || extLower == QStringLiteral("xlsx") ||
-        extLower == QStringLiteral("csv")) {
-        return theme.badgeSheetBg;
-    }
-    if (extLower == QStringLiteral("png") || extLower == QStringLiteral("jpg") ||
-        extLower == QStringLiteral("jpeg") || extLower == QStringLiteral("svg")) {
-        return theme.badgeImageBg;
-    }
-    if (extLower == QStringLiteral("cpp") || extLower == QStringLiteral("h") ||
-        extLower == QStringLiteral("py") || extLower == QStringLiteral("js") ||
-        extLower == QStringLiteral("ts") || extLower == QStringLiteral("html")) {
-        return theme.badgeCodeBg;
-    }
-    return theme.elevatedBackground;
+    clean.replace(QStringLiteral("/"), QStringLiteral(" / "));
+    return clean;
 }
 
-QColor extensionTextColor(const QString& extLower, const ThemeTokens& theme) {
-    if (extLower == QStringLiteral("pdf")) {
-        return theme.badgePdfText;
+struct SnippetSegment {
+    QString text;
+    bool highlighted = false;
+};
+
+QVector<SnippetSegment> parseSnippetSegments(const QString& rawInput) {
+    QString rawSnippet = rawInput;
+    rawSnippet.replace(QStringLiteral("\r\n"), QStringLiteral(" "));
+    rawSnippet.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    rawSnippet.replace(QLatin1Char('\r'), QLatin1Char(' '));
+    rawSnippet = rawSnippet.simplified();
+
+    QVector<SnippetSegment> segments;
+    int pos = 0;
+    const int n = rawSnippet.size();
+    while (pos < n) {
+        const int openIdx = rawSnippet.indexOf(QChar(0x00AB), pos); // '«'
+        if (openIdx < 0) {
+            segments.push_back({rawSnippet.mid(pos), false});
+            break;
+        }
+        if (openIdx > pos) {
+            segments.push_back({rawSnippet.mid(pos, openIdx - pos), false});
+        }
+        const int closeIdx = rawSnippet.indexOf(QChar(0x00BB), openIdx + 1); // '»'
+        if (closeIdx < 0) {
+            segments.push_back({rawSnippet.mid(openIdx + 1), true});
+            break;
+        }
+        segments.push_back({rawSnippet.mid(openIdx + 1, closeIdx - openIdx - 1), true});
+        pos = closeIdx + 1;
     }
-    if (extLower == QStringLiteral("doc") || extLower == QStringLiteral("docx")) {
-        return theme.badgeDocText;
+    return segments;
+}
+
+void drawHighlightedSnippet(QPainter* painter,
+                            const QRectF& rect,
+                            const QString& rawSnippet,
+                            const ThemeTokens& theme) {
+    const QVector<SnippetSegment> segments = parseSnippetSegments(rawSnippet);
+    if (segments.isEmpty()) {
+        return;
     }
-    if (extLower == QStringLiteral("txt") || extLower == QStringLiteral("md")) {
-        return theme.badgeTxtText;
+
+    const QFont normalFont = ThemeTokens::makeFont(12, QFont::Normal);
+    const QFont mediumFont = ThemeTokens::makeFont(12, QFont::DemiBold);
+    const QFontMetrics fmNormal(normalFont);
+    const QFontMetrics fmMedium(mediumFont);
+
+    const QColor normalColor = theme.textSecondary;
+    const QColor hlTextColor = theme.brandPink;
+    const QColor hlBgColor = theme.brandPinkTint;
+
+    qreal curX = rect.left();
+    const qreal maxX = rect.right();
+
+    for (const SnippetSegment& seg : segments) {
+        if (seg.text.isEmpty() || curX >= maxX - 8.0) {
+            continue;
+        }
+        const QFontMetrics& fm = seg.highlighted ? fmMedium : fmNormal;
+        const int availPx = static_cast<int>(maxX - curX);
+        QString drawText = seg.text;
+        int advance = fm.horizontalAdvance(drawText);
+        bool truncated = false;
+        if (advance > availPx) {
+            drawText = fm.elidedText(drawText, Qt::ElideRight, availPx);
+            advance = fm.horizontalAdvance(drawText);
+            truncated = true;
+        }
+
+        if (seg.highlighted && !drawText.isEmpty()) {
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(hlBgColor);
+            painter->drawRoundedRect(
+                QRectF(curX - 1.0, rect.top() + 1.0, advance + 2.0, rect.height() - 2.0), 3.0, 3.0);
+            painter->setFont(mediumFont);
+            painter->setPen(hlTextColor);
+        } else {
+            painter->setFont(normalFont);
+            painter->setPen(normalColor);
+        }
+
+        painter->drawText(QRectF(curX, rect.top(), advance + 2.0, rect.height()),
+                          Qt::AlignLeft | Qt::AlignVCenter,
+                          drawText);
+        curX += advance;
+        if (truncated) {
+            break;
+        }
     }
-    if (extLower == QStringLiteral("xls") || extLower == QStringLiteral("xlsx") ||
-        extLower == QStringLiteral("csv")) {
-        return theme.badgeSheetText;
-    }
-    if (extLower == QStringLiteral("png") || extLower == QStringLiteral("jpg") ||
-        extLower == QStringLiteral("jpeg") || extLower == QStringLiteral("svg")) {
-        return theme.badgeImageText;
-    }
-    if (extLower == QStringLiteral("cpp") || extLower == QStringLiteral("h") ||
-        extLower == QStringLiteral("py") || extLower == QStringLiteral("js") ||
-        extLower == QStringLiteral("ts") || extLower == QStringLiteral("html")) {
-        return theme.badgeCodeText;
-    }
-    return theme.textSecondary;
 }
 } // namespace
 
@@ -146,106 +207,6 @@ const search::FileSearchResult* SearchResultListModel::resultAt(int row) const n
     return &m_results.at(row);
 }
 
-namespace {
-struct SnippetSegment {
-    QString text;
-    bool highlighted = false;
-};
-
-QVector<SnippetSegment> parseSnippetSegments(const QString& rawInput) {
-    QString rawSnippet = rawInput;
-    rawSnippet.replace(QStringLiteral("\r\n"), QStringLiteral(" "));
-    rawSnippet.replace(QLatin1Char('\n'), QLatin1Char(' '));
-    rawSnippet.replace(QLatin1Char('\r'), QLatin1Char(' '));
-    rawSnippet = rawSnippet.simplified();
-
-    QVector<SnippetSegment> segments;
-    int pos = 0;
-    const int n = rawSnippet.size();
-    while (pos < n) {
-        const int openIdx = rawSnippet.indexOf(QChar(0x00AB), pos); // '«'
-        if (openIdx < 0) {
-            segments.push_back({rawSnippet.mid(pos), false});
-            break;
-        }
-        if (openIdx > pos) {
-            segments.push_back({rawSnippet.mid(pos, openIdx - pos), false});
-        }
-        const int closeIdx = rawSnippet.indexOf(QChar(0x00BB), openIdx + 1); // '»'
-        if (closeIdx < 0) {
-            segments.push_back({rawSnippet.mid(openIdx + 1), true});
-            break;
-        }
-        segments.push_back({rawSnippet.mid(openIdx + 1, closeIdx - openIdx - 1), true});
-        pos = closeIdx + 1;
-    }
-    return segments;
-}
-
-void drawHighlightedSnippet(QPainter* painter,
-                            const QRectF& rect,
-                            const QString& rawSnippet,
-                            const ThemeTokens& theme) {
-    const QVector<SnippetSegment> segments = parseSnippetSegments(rawSnippet);
-    if (segments.isEmpty()) {
-        return;
-    }
-
-    QFont normalFont(QStringLiteral("Segoe UI"), 8, QFont::Normal);
-    QFont boldFont(QStringLiteral("Segoe UI"), 8, QFont::DemiBold);
-    const QFontMetrics fmNormal(normalFont);
-    const QFontMetrics fmBold(boldFont);
-
-    const QColor normalColor = theme.textSecondary;
-    const QColor hlTextColor = theme.brandPink;
-    const QColor hlBgColor = theme.brandPinkSelected;
-
-    qreal curX = rect.left();
-    const qreal maxX = rect.right();
-
-    // Subtle Downshift pink vertical indicator
-    painter->setPen(Qt::NoPen);
-    painter->setBrush(theme.brandPink);
-    painter->drawRoundedRect(QRectF(curX, rect.top() + 3.0, 2.5, rect.height() - 6.0), 1.2, 1.2);
-    curX += 7.0;
-
-    for (const SnippetSegment& seg : segments) {
-        if (seg.text.isEmpty() || curX >= maxX - 8.0) {
-            continue;
-        }
-        const QFontMetrics& fm = seg.highlighted ? fmBold : fmNormal;
-        const int availPx = static_cast<int>(maxX - curX);
-        QString drawText = seg.text;
-        int advance = fm.horizontalAdvance(drawText);
-        bool truncated = false;
-        if (advance > availPx) {
-            drawText = fm.elidedText(drawText, Qt::ElideRight, availPx);
-            advance = fm.horizontalAdvance(drawText);
-            truncated = true;
-        }
-
-        if (seg.highlighted && !drawText.isEmpty()) {
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(hlBgColor);
-            painter->drawRoundedRect(QRectF(curX - 1.0, rect.top() + 2.0, advance + 2.0, rect.height() - 4.0), 3.0, 3.0);
-            painter->setFont(boldFont);
-            painter->setPen(hlTextColor);
-        } else {
-            painter->setFont(normalFont);
-            painter->setPen(normalColor);
-        }
-
-        painter->drawText(QRectF(curX, rect.top(), advance + 2.0, rect.height()),
-                          Qt::AlignLeft | Qt::AlignVCenter,
-                          drawText);
-        curX += advance;
-        if (truncated) {
-            break;
-        }
-    }
-}
-} // namespace
-
 // ------------------------------------------------------------------------------
 // SearchResultItemDelegate
 // ------------------------------------------------------------------------------
@@ -270,21 +231,19 @@ public:
         painter->setRenderHint(QPainter::TextAntialiasing, true);
 
         const auto theme = ThemeTokens::get(m_darkTheme);
-        const QRectF rowRect = QRectF(option.rect).adjusted(6.0, 2.0, -6.0, -2.0);
+        // Generous horizontal padding (8px outer margin + 12px inner padding)
+        const QRectF rowRect = QRectF(option.rect).adjusted(8.0, 2.0, -8.0, -2.0);
         const bool isSelected = (option.state & QStyle::State_Selected) != 0;
         const bool isHovered = (option.state & QStyle::State_MouseOver) != 0;
 
+        // Soft, low-contrast selected row surface (NO thick left pink bar)
         if (isSelected) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(theme.brandPinkTint);
+            painter->setBrush(theme.brandPinkSelected);
             painter->drawRoundedRect(rowRect, 8.0, 8.0);
-
-            // Left accent bar in Downshift Pink
-            painter->setBrush(theme.brandPink);
-            painter->drawRoundedRect(QRectF(rowRect.left() + 2.0, rowRect.top() + 8.0, 3.0, rowRect.height() - 16.0), 1.5, 1.5);
         } else if (isHovered) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(theme.elevatedBackground);
+            painter->setBrush(theme.hoverSurface);
             painter->drawRoundedRect(rowRect, 8.0, 8.0);
         }
 
@@ -298,147 +257,104 @@ public:
         const QString snippet = index.data(SearchResultListModel::SnippetRole).toString();
         const int matchedPage = index.data(SearchResultListModel::MatchedPageRole).toInt();
         const bool isPinned = index.data(SearchResultListModel::IsPinnedRole).toBool();
-        const auto matchType = static_cast<search::SearchResultMatchType>(
-            index.data(SearchResultListModel::MatchTypeRole).toInt());
 
-        // 1. Left File Icon Badge
-        const QRectF iconBox(rowRect.left() + 10.0, rowRect.top() + 9.0, 30.0, 30.0);
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(extensionBadgeColor(ext, theme));
-        painter->drawRoundedRect(iconBox, 7.0, 7.0);
+        const bool hasSnippet = !snippet.isEmpty();
 
-        QFont iconFont(QStringLiteral("Segoe UI"), 7, QFont::Bold);
-        painter->setFont(iconFont);
-        painter->setPen(extensionTextColor(ext, theme));
-        const QString badgeLabel = ext.isEmpty() ? QStringLiteral("FILE") : ext.left(4).toUpper();
-        painter->drawText(iconBox, Qt::AlignCenter, badgeLabel);
+        // 1. Small, refined 18x18 vector file-type icon (no large colorful badge)
+        const qreal iconTop = hasSnippet ? (rowRect.top() + 10.0) : (rowRect.top() + 11.0);
+        const QRectF iconRect(rowRect.left() + 12.0, iconTop, 18.0, 18.0);
+        BrandingIcon::paintFileTypeIcon(painter, iconRect, ext, m_darkTheme, isSelected);
 
-        // 2. Top-Right: Optional Content / Semantic / Pinned pill + File size label
-        const qreal textLeft = iconBox.right() + 10.0;
-        const qreal rightMargin = rowRect.right() - 10.0;
-        const qreal availWidth = rightMargin - textLeft;
+        const qreal textLeft = iconRect.right() + 10.0;
+        const qreal rightMargin = rowRect.right() - 12.0;
+        const qreal availWidth = std::max(80.0, rightMargin - textLeft);
 
-        QFont metaFont(QStringLiteral("Segoe UI"), 8, QFont::Normal);
-        painter->setFont(metaFont);
+        const QFont nameFont = ThemeTokens::makeFont(13, QFont::Medium);
+        const QFont metaFont = ThemeTokens::makeFont(11, QFont::Normal);
+        const QFontMetrics fmName(nameFont);
         const QFontMetrics fmMeta(metaFont);
-        const QColor secondaryText = theme.textSecondary;
-        const QString sizeStr = formatHumanSize(fileSize);
-        const int sizeWidth = fmMeta.horizontalAdvance(sizeStr) + 6;
 
-        painter->setPen(secondaryText);
-        painter->drawText(QRectF(rightMargin - sizeWidth, rowRect.top() + 4.0, sizeWidth, 20.0),
-                          Qt::AlignRight | Qt::AlignVCenter,
-                          sizeStr);
+        // 2. Right-side subtle metadata on Line 1:
+        //    - Show Page N subtly when known (e.g., Page 2)
+        //    - Show file size & date ONLY on hover or selection to keep inactive rows calm
+        QString rightLine1Meta;
+        if (matchedPage > 0) {
+            rightLine1Meta = QStringLiteral("Page %1").arg(matchedPage);
+        }
+        if (isSelected || isHovered) {
+            const QString sizeStr = formatHumanSize(fileSize);
+            if (rightLine1Meta.isEmpty()) {
+                rightLine1Meta = sizeStr;
+            } else {
+                rightLine1Meta = QStringLiteral("%1  ·  %2").arg(rightLine1Meta, sizeStr);
+            }
+        }
 
-        int rightReservedWidth = sizeWidth + 6;
-        if (matchType != search::SearchResultMatchType::Filename || matchedPage > 0) {
-            const bool isSemantic = (matchType == search::SearchResultMatchType::Semantic ||
-                                     matchType == search::SearchResultMatchType::Hybrid);
-            QString pillLabel;
-            if (matchType == search::SearchResultMatchType::Semantic) {
-                pillLabel = (matchedPage > 0)
-                                ? QStringLiteral("Page %1 · Semantic").arg(matchedPage)
-                                : QStringLiteral("Semantic");
-            } else if (matchType == search::SearchResultMatchType::Hybrid) {
-                pillLabel = (matchedPage > 0)
-                                ? QStringLiteral("Page %1 · Hybrid").arg(matchedPage)
-                                : QStringLiteral("Hybrid");
-            } else {
-                pillLabel = (matchedPage > 0)
-                                ? QStringLiteral("Page %1").arg(matchedPage)
-                                : QStringLiteral("Content");
-            }
-
-            QFont pillFont(QStringLiteral("Segoe UI"), 7, QFont::DemiBold);
-            const QFontMetrics fmPill(pillFont);
-            const int pillW = fmPill.horizontalAdvance(pillLabel) + 12;
-            const QRectF pillRect(rightMargin - rightReservedWidth - pillW,
-                                  rowRect.top() + 6.0,
-                                  pillW,
-                                  16.0);
-            painter->setPen(Qt::NoPen);
-            if (isSemantic) {
-                painter->setBrush(theme.semanticBadgeBg);
-            } else {
-                painter->setBrush(theme.contentBadgeBg);
-            }
-            painter->drawRoundedRect(pillRect, 4.0, 4.0);
-            painter->setFont(pillFont);
-            if (isSemantic) {
-                painter->setPen(theme.semanticBadgeText);
-            } else {
-                painter->setPen(theme.contentBadgeText);
-            }
-            painter->drawText(pillRect, Qt::AlignCenter, pillLabel);
-            rightReservedWidth += pillW + 6;
+        int rightReservedWidth = 0;
+        if (!rightLine1Meta.isEmpty()) {
+            const int metaW = fmMeta.horizontalAdvance(rightLine1Meta) + 6;
+            painter->setFont(metaFont);
+            painter->setPen(theme.textSecondary);
+            painter->drawText(QRectF(rightMargin - metaW, rowRect.top() + 7.0, metaW, 18.0),
+                              Qt::AlignRight | Qt::AlignVCenter,
+                              rightLine1Meta);
+            rightReservedWidth += metaW + 8;
         }
 
         if (isPinned) {
-            const QString pinLabel = QStringLiteral("★ Pinned");
-            QFont pillFont(QStringLiteral("Segoe UI"), 7, QFont::DemiBold);
-            const QFontMetrics fmPill(pillFont);
-            const int pillW = fmPill.horizontalAdvance(pinLabel) + 10;
-            const QRectF pillRect(rightMargin - rightReservedWidth - pillW,
-                                  rowRect.top() + 6.0,
-                                  pillW,
-                                  16.0);
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(theme.pinnedBadgeBg);
-            painter->drawRoundedRect(pillRect, 4.0, 4.0);
-            painter->setFont(pillFont);
-            painter->setPen(theme.pinnedBadgeText);
-            painter->drawText(pillRect, Qt::AlignCenter, pinLabel);
-            rightReservedWidth += pillW + 6;
+            const QRectF pinRect(rightMargin - rightReservedWidth - 12.0, rowRect.top() + 10.0, 11.0, 11.0);
+            BrandingIcon::paintPinIcon(painter, pinRect, theme.brandPink);
+            rightReservedWidth += 18;
         }
 
-        // 3. Top Line: Filename (with highlighted match range)
-        QFont nameFont(QStringLiteral("Segoe UI"), 9, QFont::DemiBold);
-        painter->setFont(nameFont);
-        const QFontMetrics fmName(nameFont);
+        // 3. Line 1: Filename (13px Medium, dark charcoal)
         const int maxNameWidth = std::max(60, static_cast<int>(availWidth - rightReservedWidth));
         const QString elidedName = fmName.elidedText(fileName, Qt::ElideMiddle, maxNameWidth);
+        const QRectF nameRect(textLeft, rowRect.top() + 6.0, maxNameWidth, 20.0);
 
-        const QColor primaryText = theme.textPrimary;
-        const QColor highlightBg = theme.brandPinkSelected;
-
-        const QRectF nameRect(textLeft, rowRect.top() + 4.0, maxNameWidth, 20.0);
         if (matchStart >= 0 && matchLen > 0 && elidedName == fileName &&
             matchStart + matchLen <= fileName.size()) {
             const QString prefix = fileName.left(matchStart);
             const int hlX = static_cast<int>(textLeft) + fmName.horizontalAdvance(prefix);
             const int hlW = fmName.horizontalAdvance(fileName.mid(matchStart, matchLen));
             painter->setPen(Qt::NoPen);
-            painter->setBrush(highlightBg);
-            painter->drawRoundedRect(QRectF(hlX - 1.0, rowRect.top() + 6.0, hlW + 2.0, 16.0), 3.0, 3.0);
+            painter->setBrush(isSelected ? theme.surfaceBackground : theme.brandPinkTint);
+            painter->drawRoundedRect(QRectF(hlX - 1.0, rowRect.top() + 8.0, hlW + 2.0, 16.0), 3.0, 3.0);
         }
 
-        painter->setPen(primaryText);
+        painter->setFont(nameFont);
+        painter->setPen(theme.textPrimary);
         painter->drawText(nameRect, Qt::AlignLeft | Qt::AlignVCenter, elidedName);
 
-        // 4. Second Line: Elided parent folder path + modification date
+        // 4. Line 2: Clean breadcrumb folder path (`Documents / Finance`)
         painter->setFont(metaFont);
-        painter->setPen(secondaryText);
-        const QString dateStr = (mtime > 0)
-                                    ? QDateTime::fromSecsSinceEpoch(mtime).toString(QStringLiteral("MMM d, yyyy"))
-                                    : QString();
-        const int dateWidth = dateStr.isEmpty() ? 0 : (fmMeta.horizontalAdvance(dateStr) + 10);
-        const QString elidedDir = fmMeta.elidedText(
-            parentDir, Qt::ElideMiddle, static_cast<int>(availWidth - dateWidth));
+        painter->setPen(theme.textSecondary);
 
-        painter->drawText(QRectF(textLeft, rowRect.top() + 23.0, availWidth - dateWidth, 18.0),
+        int dateReserved = 0;
+        if (isSelected || isHovered) {
+            const QString dateStr = (mtime > 0)
+                                        ? QDateTime::fromSecsSinceEpoch(mtime).toString(QStringLiteral("MMM d, yyyy"))
+                                        : QString();
+            if (!dateStr.isEmpty()) {
+                dateReserved = fmMeta.horizontalAdvance(dateStr) + 10;
+                painter->setPen(theme.textMuted);
+                painter->drawText(QRectF(rightMargin - dateReserved, rowRect.top() + 26.0, dateReserved, 16.0),
+                                  Qt::AlignRight | Qt::AlignVCenter,
+                                  dateStr);
+                painter->setPen(theme.textSecondary);
+            }
+        }
+
+        const QString formattedDir = formatBreadcrumbPath(parentDir);
+        const QString elidedDir = fmMeta.elidedText(
+            formattedDir, Qt::ElideMiddle, std::max(60, static_cast<int>(availWidth - dateReserved)));
+        painter->drawText(QRectF(textLeft, rowRect.top() + 26.0, availWidth - dateReserved, 16.0),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           elidedDir);
 
-        if (!dateStr.isEmpty()) {
-            painter->setPen(theme.textMuted);
-            painter->drawText(QRectF(rightMargin - dateWidth, rowRect.top() + 23.0, dateWidth, 18.0),
-                              Qt::AlignRight | Qt::AlignVCenter,
-                              dateStr);
-        }
-
-        // 5. Third Line (when content snippet is available): Highlighted snippet
-        if (!snippet.isEmpty()) {
-            const QRectF snippetRect(textLeft, rowRect.top() + 42.0, availWidth, 19.0);
+        // 5. Line 3 (only for content / semantic results): 1 clean snippet line with subtle highlight
+        if (hasSnippet) {
+            const QRectF snippetRect(textLeft, rowRect.top() + 45.0, availWidth, 18.0);
             drawHighlightedSnippet(painter, snippetRect, snippet, theme);
         }
 
@@ -475,8 +391,8 @@ SearchPopupWidget::SearchPopupWidget(QWidget* parent)
     m_listView->viewport()->setAutoFillBackground(false);
     m_listView->setStyleSheet(QStringLiteral(
         "QListView { background: transparent; border: none; outline: none; }"
-        "QScrollBar:vertical { width: 6px; background: transparent; margin: 4px 2px; }"
-        "QScrollBar::handle:vertical { background: rgba(148, 163, 184, 120); border-radius: 3px; min-height: 24px; }"
+        "QScrollBar:vertical { width: 5px; background: transparent; margin: 4px 2px; }"
+        "QScrollBar::handle:vertical { background: rgba(148, 163, 184, 110); border-radius: 2px; min-height: 24px; }"
         "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"));
     m_listView->hide();
 
@@ -651,7 +567,8 @@ bool SearchPopupWidget::activateSelected() {
 int SearchPopupWidget::desiredPopupHeight() const noexcept {
     const int count = resultCount();
     if (count <= 0) {
-        return kHeaderHeight + 98;
+        // Must equal DesktopSearchBar::kPopupHeight (132) so phase0_tests kExpandedHeight invariant holds
+        return kHeaderHeight + 96;
     }
     const int visibleRows = qMin(count, kMaxVisibleRows);
     int rowsHeight = 0;
@@ -667,7 +584,7 @@ QString SearchPopupWidget::statusHeadline() const {
     if (database::DatabaseManager::instance().fileCount() == 0) {
         return QStringLiteral("Your search index is not ready yet.");
     }
-    return QStringLiteral("No matching files found.");
+    return QStringLiteral("No matching files");
 }
 
 void SearchPopupWidget::resizeEvent(QResizeEvent* event) {
@@ -679,21 +596,29 @@ void SearchPopupWidget::updateListLayout() {
     if (m_listView != nullptr && m_listView->isVisible()) {
         const int previewAdd = (m_previewVisible && resultCount() > 0) ? kPreviewHeight : 0;
         const int listH = std::max(0, height() - kHeaderHeight - previewAdd - kFooterHeight - 6);
-        m_listView->setGeometry(2, kHeaderHeight + 2, width() - 4, listH);
+        m_listView->setGeometry(2, kHeaderHeight + 3, width() - 4, listH);
     }
 }
 
 QRectF SearchPopupWidget::modePillRect(int modeIndex) const {
-    static const int widths[4] = {38, 46, 62, 68};
-    qreal x = 12.0;
+    static const int widths[4] = {34, 44, 62, 68};
+    qreal x = 14.0;
     for (int i = 0; i < modeIndex && i < 4; ++i) {
-        x += widths[i] + 5.0;
+        x += widths[i] + 8.0;
     }
-    return QRectF(x, 6.0, widths[modeIndex], 20.0);
+    return QRectF(x, 6.0, widths[modeIndex], kHeaderHeight - 6.0);
 }
 
 QRectF SearchPopupWidget::previewToggleRect() const {
-    return QRectF(width() - 72.0, 6.0, 60.0, 20.0);
+    return QRectF(width() - 78.0, 7.0, 64.0, 22.0);
+}
+
+QRectF SearchPopupWidget::previewOpenButtonRect(const QRectF& previewPaneRect) const {
+    return QRectF(previewPaneRect.right() - 188.0, previewPaneRect.top() + 8.0, 56.0, 24.0);
+}
+
+QRectF SearchPopupWidget::previewRevealButtonRect(const QRectF& previewPaneRect) const {
+    return QRectF(previewPaneRect.right() - 126.0, previewPaneRect.top() + 8.0, 112.0, 24.0);
 }
 
 void SearchPopupWidget::mousePressEvent(QMouseEvent* event) {
@@ -717,6 +642,23 @@ void SearchPopupWidget::mousePressEvent(QMouseEvent* event) {
                 }
                 if (previewToggleRect().contains(pos)) {
                     togglePreview();
+                    event->accept();
+                    return;
+                }
+            }
+        } else if (m_previewVisible && resultCount() > 0) {
+            const QRectF bounds = QRectF(rect()).adjusted(1.0, 1.0, -1.0, -1.0);
+            const qreal footerTop = bounds.bottom() - kFooterHeight - 1.0;
+            const qreal previewTop = footerTop - kPreviewHeight;
+            const QRectF prevPane(bounds.left() + 14.0, previewTop, bounds.width() - 28.0, kPreviewHeight);
+            if (const auto* sel = selectedResult()) {
+                if (previewOpenButtonRect(prevPane).contains(pos)) {
+                    emit resultActivated(*sel);
+                    event->accept();
+                    return;
+                }
+                if (previewRevealButtonRect(prevPane).contains(pos)) {
+                    emit revealInExplorerRequested(*sel);
                     event->accept();
                     return;
                 }
@@ -783,38 +725,40 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
 
     const auto theme = ThemeTokens::get(m_darkTheme);
     const QRectF bounds = QRectF(rect()).adjusted(1.0, 1.0, -1.0, -1.0);
-    const qreal cornerRadius = 16.0;
+    const qreal cornerRadius = 14.0;
 
-    // Soft elevated shadow
+    // Minimal soft shadow
     painter.setPen(Qt::NoPen);
     painter.setBrush(theme.shadowColor);
-    painter.drawRoundedRect(bounds.adjusted(0.0, 2.0, 0.0, 2.0), cornerRadius, cornerRadius);
+    painter.drawRoundedRect(bounds.adjusted(0.0, 1.5, 0.0, 1.5), cornerRadius, cornerRadius);
 
-    // Card surface and border
+    // Outer container surface and subtle border
     QPen borderPen(theme.borderColor, 1.0);
     painter.setPen(borderPen);
     painter.setBrush(theme.surfaceBackground);
-    painter.drawRoundedRect(bounds.adjusted(0.0, 0.0, 0.0, -1.0), cornerRadius, cornerRadius);
+    painter.drawRoundedRect(bounds.adjusted(0.0, 0.0, 0.0, -0.5), cornerRadius, cornerRadius);
 
-    // 1. Top Search Mode / Related Header Bar
-    QFont pillFont(QStringLiteral("Segoe UI"), 8, QFont::DemiBold);
-    painter.setFont(pillFont);
+    // 1. Top Search Mode Navigation (subtle Linear-style text tabs with crisp underline indicator)
+    const QFont tabActiveFont = ThemeTokens::makeFont(12, QFont::DemiBold);
+    const QFont tabInactiveFont = ThemeTokens::makeFont(12, QFont::Normal);
 
     if (!m_relatedSourceFileName.isEmpty()) {
-        painter.setPen(theme.brandPink);
-        const QFontMetrics fm(pillFont);
+        painter.setFont(tabActiveFont);
+        painter.setPen(theme.textPrimary);
+        const QFontMetrics fm(tabActiveFont);
         const QString banner = fm.elidedText(
-            QStringLiteral("Similar to: %1").arg(m_relatedSourceFileName),
+            QStringLiteral("Similar to %1").arg(m_relatedSourceFileName),
             Qt::ElideMiddle,
-            width() - 95);
-        painter.drawText(QRectF(14.0, 7.0, width() - 95.0, 20.0), Qt::AlignLeft | Qt::AlignVCenter, banner);
+            width() - 104);
+        painter.drawText(QRectF(16.0, 6.0, width() - 104.0, 24.0), Qt::AlignLeft | Qt::AlignVCenter, banner);
 
         const QRectF backRect = previewToggleRect();
-        painter.setPen(Qt::NoPen);
+        painter.setPen(QPen(theme.borderSubtle, 1.0));
         painter.setBrush(theme.elevatedBackground);
-        painter.drawRoundedRect(backRect, 6.0, 6.0);
-        painter.setPen(theme.textPrimary);
-        painter.drawText(backRect, Qt::AlignCenter, QStringLiteral("× Back"));
+        painter.drawRoundedRect(backRect, 5.0, 5.0);
+        painter.setFont(tabInactiveFont);
+        painter.setPen(theme.textSecondary);
+        painter.drawText(backRect, Qt::AlignCenter, QStringLiteral("← Back"));
     } else {
         static const QString kModeNames[4] = {
             QStringLiteral("All"),
@@ -823,128 +767,148 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
             QStringLiteral("Semantic")
         };
         for (int i = 0; i < 4; ++i) {
-            const QRectF pRect = modePillRect(i);
+            const QRectF tRect = modePillRect(i);
             const bool active = (static_cast<int>(m_searchMode) == i);
+            painter.setFont(active ? tabActiveFont : tabInactiveFont);
+            painter.setPen(active ? theme.textPrimary : theme.textSecondary);
+            painter.drawText(QRectF(tRect.left(), 6.0, tRect.width(), 22.0), Qt::AlignCenter, kModeNames[i]);
+
             if (active) {
                 painter.setPen(Qt::NoPen);
-                painter.setBrush(theme.brandPinkSelected);
-                painter.drawRoundedRect(pRect, 6.0, 6.0);
-                painter.setPen(theme.brandPink);
-            } else {
-                painter.setPen(theme.textSecondary);
+                painter.setBrush(theme.brandPink);
+                painter.drawRoundedRect(
+                    QRectF(tRect.left() + 4.0, kHeaderHeight - 2.0, tRect.width() - 8.0, 2.0), 1.0, 1.0);
             }
-            painter.drawText(pRect, Qt::AlignCenter, kModeNames[i]);
         }
 
-        // Right-side Quick Preview toggle pill
+        // Right-side contextual Preview toggle
         const QRectF prevRect = previewToggleRect();
+        painter.setFont(ThemeTokens::makeFont(11, m_previewVisible ? QFont::DemiBold : QFont::Normal));
         if (m_previewVisible) {
             painter.setPen(Qt::NoPen);
-            painter.setBrush(theme.brandPinkTint);
-            painter.drawRoundedRect(prevRect, 6.0, 6.0);
+            painter.setBrush(theme.brandPinkSelected);
+            painter.drawRoundedRect(prevRect, 5.0, 5.0);
             painter.setPen(theme.brandPink);
         } else {
-            painter.setPen(QPen(theme.borderColor, 1.0));
-            painter.setBrush(theme.elevatedBackground);
-            painter.drawRoundedRect(prevRect, 6.0, 6.0);
             painter.setPen(theme.textSecondary);
         }
         painter.drawText(prevRect, Qt::AlignCenter, QStringLiteral("Preview"));
     }
 
-    // Header divider line
+    // Hairline header separator
     painter.setPen(QPen(theme.borderSubtle, 1.0));
-    painter.drawLine(QPointF(bounds.left() + 12.0, kHeaderHeight),
-                     QPointF(bounds.right() - 12.0, kHeaderHeight));
+    painter.drawLine(QPointF(bounds.left() + 14.0, kHeaderHeight),
+                     QPointF(bounds.right() - 14.0, kHeaderHeight));
 
-    // 2. Empty State
+    // 2. Empty / Loading State (clean typography, no decorative circles)
     if (resultCount() == 0) {
-        const qreal emptyTop = kHeaderHeight + 14.0;
-        const QRectF iconCircle(bounds.left() + 18.0, emptyTop + 4.0, 32.0, 32.0);
-        painter.setPen(QPen(theme.brandPinkBorder, 1.0));
-        painter.setBrush(theme.brandPinkTint);
-        painter.drawEllipse(iconCircle);
-
-        QFont badgeFont(QStringLiteral("Segoe UI"), 10, QFont::DemiBold);
-        painter.setFont(badgeFont);
-        painter.setPen(theme.brandPink);
-        painter.drawText(iconCircle, Qt::AlignCenter, QStringLiteral("i"));
-
-        QFont titleFont(QStringLiteral("Segoe UI"), 10, QFont::DemiBold);
+        const qreal emptyTop = kHeaderHeight + 18.0;
+        const QFont titleFont = ThemeTokens::makeFont(13, QFont::Medium);
         painter.setFont(titleFont);
         painter.setPen(theme.textPrimary);
-        const QRectF titleRect(iconCircle.right() + 14.0,
-                               emptyTop,
-                               bounds.width() - (iconCircle.right() - bounds.left()) - 18.0,
-                               22.0);
+        const QRectF titleRect(bounds.left() + 18.0, emptyTop, bounds.width() - 36.0, 20.0);
         painter.drawText(titleRect, Qt::AlignLeft | Qt::AlignVCenter, statusHeadline());
 
-        QFont subFont(QStringLiteral("Segoe UI"), 8.5, QFont::Normal);
+        const QFont subFont = ThemeTokens::makeFont(12, QFont::Normal);
         painter.setFont(subFont);
         painter.setPen(theme.textSecondary);
-        const QRectF subRect(iconCircle.right() + 14.0,
-                             titleRect.bottom() + 1.0,
-                             titleRect.width(),
-                             20.0);
+        const QRectF subRect(bounds.left() + 18.0, titleRect.bottom() + 3.0, bounds.width() - 36.0, 18.0);
         const QString subtitle = (database::DatabaseManager::instance().fileCount() == 0)
                                      ? (m_indexingInProgress
-                                            ? QStringLiteral("Scanning approved folders in the background...")
-                                            : QStringLiteral("Local file indexing is initializing."))
-                                     : QStringLiteral("Try another query or filter (ext:pdf, type:doc, modified:7d).");
+                                            ? QStringLiteral("Indexing folders in the background...")
+                                            : QStringLiteral("Local file index is initializing."))
+                                     : QStringLiteral("Try a shorter keyword or press Tab to switch search modes.");
         painter.drawText(subRect, Qt::AlignLeft | Qt::AlignVCenter, subtitle);
     }
 
-    // 3. Optional Quick Preview Pane
+    // 3. Optional Quick Preview Section (clean horizontal separator, no nested rounded card)
     const qreal footerTop = bounds.bottom() - kFooterHeight - 1.0;
     if (m_previewVisible && resultCount() > 0) {
         const qreal previewTop = footerTop - kPreviewHeight;
         painter.setPen(QPen(theme.borderSubtle, 1.0));
-        painter.drawLine(QPointF(bounds.left() + 12.0, previewTop),
-                         QPointF(bounds.right() - 12.0, previewTop));
+        painter.drawLine(QPointF(bounds.left() + 14.0, previewTop),
+                         QPointF(bounds.right() - 14.0, previewTop));
 
-        const QRectF prevBox(bounds.left() + 12.0, previewTop + 6.0, bounds.width() - 24.0, kPreviewHeight - 12.0);
-        painter.setPen(QPen(theme.borderColor, 1.0));
-        painter.setBrush(theme.elevatedBackground);
-        painter.drawRoundedRect(prevBox, 8.0, 8.0);
+        const QRectF prevPane(bounds.left() + 16.0, previewTop + 2.0, bounds.width() - 32.0, kPreviewHeight - 4.0);
 
         if (const auto* sel = selectedResult()) {
-            QFont hdrFont(QStringLiteral("Segoe UI"), 8.5, QFont::DemiBold);
+            const QRectF openBtn = previewOpenButtonRect(prevPane);
+            const QRectF revealBtn = previewRevealButtonRect(prevPane);
+
+            // Action buttons in preview header: Open & Reveal
+            const QFont btnFont = ThemeTokens::makeFont(11, QFont::Medium);
+            painter.setFont(btnFont);
+
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(theme.brandPink);
+            painter.drawRoundedRect(openBtn, 5.0, 5.0);
+            painter.setPen(QColor(255, 255, 255));
+            painter.drawText(openBtn, Qt::AlignCenter, QStringLiteral("Open"));
+
+            painter.setPen(QPen(theme.borderColor, 1.0));
+            painter.setBrush(theme.elevatedBackground);
+            painter.drawRoundedRect(revealBtn, 5.0, 5.0);
+            painter.setPen(theme.textPrimary);
+            painter.drawText(revealBtn, Qt::AlignCenter, QStringLiteral("Reveal in Explorer"));
+
+            // Full filename & location metadata
+            const QFont hdrFont = ThemeTokens::makeFont(13, QFont::DemiBold);
             painter.setFont(hdrFont);
             painter.setPen(theme.textPrimary);
             const QFontMetrics fmHdr(hdrFont);
-            const QString nativePath = QDir::toNativeSeparators(sel->path);
-            const QString elidedPath = fmHdr.elidedText(nativePath, Qt::ElideMiddle, static_cast<int>(prevBox.width() - 16.0));
-            painter.drawText(QRectF(prevBox.left() + 10.0, prevBox.top() + 6.0, prevBox.width() - 20.0, 16.0),
+            const int maxTitleW = std::max(100, static_cast<int>(openBtn.left() - prevPane.left() - 12.0));
+            const QString elidedName = fmHdr.elidedText(sel->name, Qt::ElideMiddle, maxTitleW);
+            painter.drawText(QRectF(prevPane.left(), prevPane.top() + 6.0, maxTitleW, 18.0),
                              Qt::AlignLeft | Qt::AlignVCenter,
-                             elidedPath);
+                             elidedName);
 
-            QFont bodyFont(QStringLiteral("Segoe UI"), 8, QFont::Normal);
-            painter.setFont(bodyFont);
+            const QFont locFont = ThemeTokens::makeFont(11, QFont::Normal);
+            painter.setFont(locFont);
             painter.setPen(theme.textSecondary);
+            const QFontMetrics fmLoc(locFont);
+            QString locMeta = formatBreadcrumbPath(sel->parentDirectory);
+            if (sel->matchedPage > 0) {
+                locMeta = QStringLiteral("%1  ·  Page %2").arg(locMeta).arg(sel->matchedPage);
+            }
+            locMeta = QStringLiteral("%1  ·  %2").arg(locMeta, formatHumanSize(sel->size));
+            const QString elidedLoc = fmLoc.elidedText(locMeta, Qt::ElideMiddle, maxTitleW);
+            painter.drawText(QRectF(prevPane.left(), prevPane.top() + 24.0, maxTitleW, 16.0),
+                             Qt::AlignLeft | Qt::AlignVCenter,
+                             elidedLoc);
+
+            // Readable extracted document passage
+            const QFont bodyFont = ThemeTokens::makeFont(12, QFont::Normal);
+            painter.setFont(bodyFont);
+            painter.setPen(theme.textPrimary);
             const QString body = m_previewText.isEmpty()
-                                     ? (sel->snippet.isEmpty() ? QStringLiteral("No text preview available.") : sel->snippet)
+                                     ? (sel->snippet.isEmpty() ? QStringLiteral("No document text preview available for this file.") : sel->snippet)
                                      : m_previewText;
             QString cleanBody = body;
             cleanBody.replace(QChar(0x00AB), QString());
             cleanBody.replace(QChar(0x00BB), QString());
-            painter.drawText(QRectF(prevBox.left() + 10.0, prevBox.top() + 24.0, prevBox.width() - 20.0, prevBox.height() - 28.0),
-                             Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
-                             cleanBody);
+            cleanBody = cleanBody.simplified();
+
+            painter.drawText(
+                QRectF(prevPane.left(), prevPane.top() + 46.0, prevPane.width(), prevPane.height() - 50.0),
+                Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
+                cleanBody);
         }
     }
 
-    // 4. Bottom divider & status footer bar
+    // 4. Minimal Utility Footer
     painter.setPen(QPen(theme.borderSubtle, 1.0));
-    painter.drawLine(QPointF(bounds.left() + 12.0, footerTop), QPointF(bounds.right() - 12.0, footerTop));
+    painter.drawLine(QPointF(bounds.left() + 14.0, footerTop), QPointF(bounds.right() - 14.0, footerTop));
 
-    QFont footerFont(QStringLiteral("Segoe UI"), 8, QFont::Normal);
+    const QFont footerFont = ThemeTokens::makeFont(11, QFont::Normal);
     painter.setFont(footerFont);
     painter.setPen(theme.textSecondary);
-    const QRectF footerRect(bounds.left() + 14.0, footerTop + 1.0, bounds.width() - 28.0, kFooterHeight - 2.0);
+    const QRectF footerRect(bounds.left() + 16.0, footerTop + 1.0, bounds.width() - 32.0, kFooterHeight - 2.0);
 
-    QString leftFooter = QStringLiteral("UshaLabs Lumen • Offline Mode");
+    QString leftFooter = m_indexingInProgress
+                             ? QStringLiteral("Indexing files...")
+                             : QStringLiteral("Ready");
     if (resultCount() > 0) {
-        leftFooter = QStringLiteral("%1 %2 • %3 ms")
+        leftFooter = QStringLiteral("%1 %2  ·  %3 ms")
                          .arg(resultCount())
                          .arg(resultCount() == 1 ? QStringLiteral("result") : QStringLiteral("results"))
                          .arg(m_lastQueryMs, 0, 'f', 1);
@@ -952,8 +916,8 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
     painter.drawText(footerRect, Qt::AlignLeft | Qt::AlignVCenter, leftFooter);
 
     const QString rightFooter = (resultCount() > 0)
-                                    ? QStringLiteral("Tab Mode  •  ^P Preview  •  ↵ Open")
-                                    : QStringLiteral("Esc to close");
+                                    ? QStringLiteral("↵ Open   ^↵ Reveal   ^P Preview   Tab Mode")
+                                    : QStringLiteral("Esc Close");
     painter.setPen(theme.textMuted);
     painter.drawText(footerRect, Qt::AlignRight | Qt::AlignVCenter, rightFooter);
 }
