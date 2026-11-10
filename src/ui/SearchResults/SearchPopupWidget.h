@@ -62,7 +62,7 @@ public:
     static constexpr int kContentRowHeight = 76;
     static constexpr int kSplitBodyMinHeight = 420;
     static constexpr int kPreviewHeight = 48;
-    static constexpr int kFooterHeight = 34;
+    static constexpr int kFooterHeight = 0;
     static constexpr int kMaxVisibleRows = 6;
 
     explicit SearchPopupWidget(QWidget* parent = nullptr);

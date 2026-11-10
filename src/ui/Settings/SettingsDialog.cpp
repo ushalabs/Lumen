@@ -72,7 +72,7 @@ public:
 QLabel* createSectionHeader(const QString& title, QWidget* parent) {
     auto* lbl = new QLabel(title, parent);
     lbl->setObjectName(QStringLiteral("sectionHeader"));
-    lbl->setFont(ThemeTokens::makeFont(14, QFont::DemiBold, true));
+    lbl->setFont(ThemeTokens::makeFont(14, QFont::Medium, true));
     return lbl;
 }
 
@@ -255,8 +255,8 @@ void SettingsDialog::applyThemeStyles() {
     }
 
     m_signatureLabel->setText(
-        QStringLiteral("<span style='font-size:13px;font-weight:600;color:%1'>Usha</span>"
-                       "<span style='font-size:13px;font-weight:600;color:%2'>Labs</span>"
+        QStringLiteral("<span style='font-size:13px;font-weight:500;color:%1'>Usha</span>"
+                       "<span style='font-size:13px;font-weight:500;color:%2'>Labs</span>"
                        "<span style='font-size:11px;color:%3'>  ·  100% Offline</span>")
             .arg(theme.textPrimary.name(), theme.brandPink.name(), theme.textSecondary.name()));
 
@@ -278,7 +278,7 @@ void SettingsDialog::applyThemeStyles() {
         "}"
         "QPushButton:hover { background-color: %8; border-color: %9; color: %2; }"
         "QPushButton:pressed { background-color: %10; }"
-        "QPushButton:default { background-color: %10; color: %2; border: 1px solid %9; font-weight: 600; }"
+        "QPushButton:default { background-color: %10; color: %2; border: 1px solid %9; font-weight: 500; }"
         "QPushButton:default:hover { background-color: %8; border-color: %9; color: %2; }"
         "QLineEdit {"
         "  background-color: %1;"

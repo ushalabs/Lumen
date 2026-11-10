@@ -91,9 +91,8 @@ int main(int argc, char* argv[]) {
                 bar->show();
                 bar->collapsePopupAndDeactivate(true);
                 QCoreApplication::processEvents();
-                bar->grab().save(dir.filePath(QStringLiteral("desktop_icon.png")));
 
-                // Capture open search bar (slid out, nothing underneath when empty)
+                // Capture open search bar (slid out, nothing underneath when empty, icon always on left)
                 bar->activateAndFocusSearch(false);
                 QCoreApplication::processEvents();
                 const QPixmap idleGrab = bar->grab();

@@ -64,7 +64,7 @@ DesktopSearchBar::DesktopSearchBar(QWidget* parent)
     m_searchEdit = new QLineEdit(this);
     m_searchEdit->setPlaceholderText(QStringLiteral("Search files, documents, and more..."));
     m_searchEdit->setFrame(false);
-    m_searchEdit->setFont(ThemeTokens::makeFont(15, QFont::Medium));
+    m_searchEdit->setFont(ThemeTokens::makeFont(14, QFont::Normal));
     m_searchEdit->setAttribute(Qt::WA_MacShowFocusRect, false);
     m_searchEdit->setContextMenuPolicy(Qt::DefaultContextMenu);
     m_searchEdit->installEventFilter(this);
@@ -251,7 +251,7 @@ void DesktopSearchBar::refreshAppearanceFromSettings() {
     const QString placeholderColor = theme.textMuted.name();
     const QString selectionBg = theme.brandPinkStrongFill.name();
 
-    m_searchEdit->setFont(ThemeTokens::makeFont(15, QFont::Medium));
+    m_searchEdit->setFont(ThemeTokens::makeFont(14, QFont::Normal));
     m_searchEdit->setStyleSheet(QStringLiteral(
         "QLineEdit {"
         "  background: transparent;"
@@ -388,20 +388,12 @@ void DesktopSearchBar::setSearchText(const QString& text) {
 }
 
 QRectF DesktopSearchBar::iconTileRect() const {
-    if (!m_barExpanded) {
-        return QRectF(10.0, 10.0, 36.0, 36.0);
-    }
-    if (m_slidesLeft) {
-        return QRectF(width() - 46.0, 10.0, 36.0, 36.0);
-    }
-    return QRectF(12.0, 10.0, 36.0, 36.0);
+    // Always anchored on the left side whether collapsed or slid open from left or right
+    return QRectF(10.0, 10.0, 36.0, 36.0);
 }
 
 QRectF DesktopSearchBar::clearButtonHitRect() const {
-    if (m_slidesLeft) {
-        return QRectF(width() - 78.0, 17.0, 22.0, 22.0);
-    }
-    return QRectF(width() - 36.0, 17.0, 22.0, 22.0);
+    return QRectF(width() - 38.0, 17.0, 22.0, 22.0);
 }
 
 void DesktopSearchBar::updateSearchInputGeometry() {
@@ -414,15 +406,8 @@ void DesktopSearchBar::updateSearchInputGeometry() {
     }
     const bool hasText = !m_searchEdit->text().trimmed().isEmpty();
     const int w = width();
-    int leftOffset = 18;
-    int rightMargin = 62;
-    if (m_slidesLeft) {
-        leftOffset = 18;
-        rightMargin = hasText ? 86 : 60;
-    } else {
-        leftOffset = 58;
-        rightMargin = hasText ? 44 : 18;
-    }
+    const int leftOffset = 56;
+    const int rightMargin = hasText ? 46 : 18;
     const int editWidth = std::max(0, w - leftOffset - rightMargin);
     if (editWidth < 40) {
         m_searchEdit->setGeometry(leftOffset, 11, 0, 34);

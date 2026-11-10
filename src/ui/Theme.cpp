@@ -9,15 +9,15 @@ ThemeTokens ThemeTokens::get(bool /*dark*/) {
     return ThemeTokens{
         /* brandPink           */ QColor(236, 22, 128),     // #EC1680 (UshaLabs Downshift/Lumen Pink)
         /* brandPinkHover      */ QColor(244, 114, 182),    // #F472B6 (Clean medium-light pink hover)
-        /* brandPinkLight      */ QColor(15, 15, 18),       // #0F0F12 (Crisp Black text for light pink elements)
+        /* brandPinkLight      */ QColor(44, 44, 50),       // #2C2C32 (Softened black text for light pink elements)
         /* brandPinkTint       */ QColor(253, 242, 248),    // #FDF2F8 (Soft blush light pink fill)
         /* brandPinkSelected   */ QColor(252, 231, 243),    // #FCE7F3 (Clean light pink selected card/pill)
         /* brandPinkStrongFill */ QColor(251, 207, 232),    // #FBCFE8 (Richer light pink for primary buttons/highlights)
-        /* brandPinkBorder     */ QColor(236, 22, 128, 165), // Crisp pink focus/selection border
+        /* brandPinkBorder     */ QColor(236, 22, 128, 150), // Clean pink focus/selection border
 
-        /* textPrimary         */ QColor(15, 15, 18),       // #0F0F12 (Crisp Black)
-        /* textSecondary       */ QColor(63, 63, 70),       // #3F3F46 (Dark charcoal)
-        /* textMuted           */ QColor(113, 113, 122),    // #71717A (Muted gray)
+        /* textPrimary         */ QColor(44, 44, 50),       // #2C2C32 (Soft lighter black - not harsh/heavy)
+        /* textSecondary       */ QColor(92, 92, 102),      // #5C5C66 (Medium-dark slate)
+        /* textMuted           */ QColor(126, 126, 136),    // #7E7E88 (Soft muted gray)
 
         /* surfaceBackground   */ QColor(255, 255, 255),    // #FFFFFF (Pure White surface)
         /* elevatedBackground  */ QColor(253, 242, 248),    // #FDF2F8 (Light pink elevated element)
@@ -27,35 +27,35 @@ ThemeTokens ThemeTokens::get(bool /*dark*/) {
         /* hoverSurface        */ QColor(252, 231, 243),    // #FCE7F3 (Clean light pink hover)
         /* borderColor         */ QColor(249, 168, 212),    // #F9A8D4 (Clean light pink border)
         /* borderSubtle        */ QColor(252, 231, 243),    // #FCE7F3 (Soft pink hairline divider)
-        /* shadowColor         */ QColor(15, 23, 42, 24),   // Soft subtle window shadow
+        /* shadowColor         */ QColor(15, 23, 42, 22),   // Soft subtle window shadow
 
-        /* iconPrimary         */ QColor(15, 15, 18),       // #0F0F12 (Black glyph inside light pink tile)
-        /* iconSecondary       */ QColor(63, 63, 70),
+        /* iconPrimary         */ QColor(44, 44, 50),       // #2C2C32 (Soft black glyph inside light pink tile)
+        /* iconSecondary       */ QColor(92, 92, 102),
         /* iconAccentPdf       */ QColor(190, 24, 93),      // Deep rose-pink
-        /* iconAccentDoc       */ QColor(15, 15, 18),       // Black
+        /* iconAccentDoc       */ QColor(44, 44, 50),       // Soft black
         /* iconAccentSheet     */ QColor(21, 128, 61),      // Deep green
-        /* iconAccentCode      */ QColor(15, 15, 18),       // Black
+        /* iconAccentCode      */ QColor(44, 44, 50),       // Soft black
         /* iconAccentImage     */ QColor(180, 83, 9),       // Deep amber
 
         /* badgePdfBg          */ QColor(252, 231, 243),
-        /* badgePdfText        */ QColor(15, 15, 18),
+        /* badgePdfText        */ QColor(44, 44, 50),
         /* badgeDocBg          */ QColor(252, 231, 243),
-        /* badgeDocText        */ QColor(15, 15, 18),
+        /* badgeDocText        */ QColor(44, 44, 50),
         /* badgeTxtBg          */ QColor(253, 242, 248),
-        /* badgeTxtText        */ QColor(15, 15, 18),
+        /* badgeTxtText        */ QColor(44, 44, 50),
         /* badgeCodeBg         */ QColor(252, 231, 243),
-        /* badgeCodeText       */ QColor(15, 15, 18),
+        /* badgeCodeText       */ QColor(44, 44, 50),
         /* badgeSheetBg        */ QColor(253, 242, 248),
-        /* badgeSheetText      */ QColor(15, 15, 18),
+        /* badgeSheetText      */ QColor(44, 44, 50),
         /* badgeImageBg        */ QColor(253, 242, 248),
-        /* badgeImageText      */ QColor(15, 15, 18),
+        /* badgeImageText      */ QColor(44, 44, 50),
 
         /* semanticBadgeBg     */ QColor(252, 231, 243),
-        /* semanticBadgeText   */ QColor(15, 15, 18),
+        /* semanticBadgeText   */ QColor(44, 44, 50),
         /* contentBadgeBg      */ QColor(253, 242, 248),
-        /* contentBadgeText    */ QColor(15, 15, 18),
+        /* contentBadgeText    */ QColor(44, 44, 50),
         /* pinnedBadgeBg       */ QColor(251, 207, 232),
-        /* pinnedBadgeText     */ QColor(15, 15, 18)
+        /* pinnedBadgeText     */ QColor(44, 44, 50)
     };
 }
 

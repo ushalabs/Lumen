@@ -142,11 +142,15 @@ private slots:
         QVERIFY(bar.slidesLeft());
 
         // Opening the empty bar slides it out cleanly with NO results popup shown underneath
+        const QPoint rightAnchor = bar.pos();
         bar.activateAndFocusSearch(false);
         QCoreApplication::processEvents();
         QVERIFY(bar.isBarExpanded());
         QCOMPARE(bar.width(), lumen::ui::DesktopSearchBar::kBarWidth);
         QCOMPARE(bar.height(), lumen::ui::DesktopSearchBar::kBarHeight);
+        // Docked on right: bar (including left-anchored icon) slides leftward
+        QVERIFY(bar.pos().x() < rightAnchor.x());
+        QVERIFY(bar.lineEdit()->x() >= 48); // Input stays to the right of the left-side icon
         QVERIFY(!bar.isPopupExpanded());
         QVERIFY(!bar.popupWidget()->isVisible());
 
@@ -174,9 +178,15 @@ private slots:
         QCOMPARE(bar.width(), lumen::ui::DesktopSearchBar::kIconSize);
         QCOMPARE(bar.height(), lumen::ui::DesktopSearchBar::kIconSize);
 
-        // Verify left-side placement slides right instead of left
+        // Verify left-side placement keeps left edge anchored while only bar slides right
         const QPoint leftPos = lumen::ui::DesktopSearchBar::clampPositionToScreens(QPoint(24, 140));
         QVERIFY(!lumen::ui::DesktopSearchBar::shouldSlideLeftFromAnchor(leftPos));
+        lumen::core::SettingsManager::instance().setDesktopBarPosition(leftPos, false);
+        bar.applySavedOrDefaultPosition();
+        bar.activateAndFocusSearch(false);
+        QCOMPARE(bar.pos().x(), leftPos.x());
+        QVERIFY(bar.lineEdit()->x() >= 48);
+        lumen::core::SettingsManager::instance().resetDesktopBarPosition(false);
     }
 
     void testPositionPersistenceAcrossInstances() {

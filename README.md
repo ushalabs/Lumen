@@ -42,11 +42,9 @@ Built to follow the visual identity and design language of **UshaLabs Downshift*
 
 ### 1. Docked Desktop Icon & Slide-Out Search Bar
 
-Lumen sits quietly on the Windows desktop as a compact `56 × 56` pure white & pink launcher icon (`HWND_BOTTOM`, hidden from the taskbar) that you can drag anywhere on screen. Clicking the icon—or pressing `Ctrl+Alt+Space`—smoothly slides the search bar out to the left when docked on the right (or to the right when docked on the left), keeping the UI completely uncluttered until you start typing.
+Lumen sits quietly on the Windows desktop as a compact `56 × 56` pure white & pink launcher icon (`HWND_BOTTOM`, hidden from the taskbar) that you can drag anywhere on screen. When docked on the right, clicking the icon smoothly slides the icon and search bar together to the left; when docked on the left, clicking it slides only the search bar out to the right—with the Lumen icon always anchored cleanly on the left side.
 
 <div align="center">
-  <img src="docs/screenshots/desktop_icon.png" alt="Lumen Docked Desktop Icon" width="64" />
-  <br /><br />
   <img src="docs/screenshots/desktop_search_bar.png" alt="Lumen Slide-Out Search Bar" width="460" />
 </div>
 
