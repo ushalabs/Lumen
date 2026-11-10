@@ -147,7 +147,8 @@ void BrandingIcon::paintFileTypeIcon(QPainter* painter,
                                      const QRectF& targetRect,
                                      const QString& extensionLower,
                                      bool /*darkTheme*/,
-                                     bool selected) {
+                                     bool selected,
+                                     bool isDirectory) {
     if (painter == nullptr || targetRect.isEmpty()) {
         return;
     }
@@ -170,6 +171,13 @@ void BrandingIcon::paintFileTypeIcon(QPainter* painter,
     painter->setPen(QPen(tileBorder, 1.0));
     painter->setBrush(tileBg);
     painter->drawRoundedRect(box, tileRadius, tileRadius);
+
+    if (isDirectory) {
+        const QColor folderColor = selected ? theme.brandPink : QColor(217, 119, 6);
+        paintFolderIcon(painter, box.adjusted(s * 0.16, s * 0.16, -s * 0.16, -s * 0.16), folderColor);
+        painter->restore();
+        return;
+    }
 
     // Subtle colored type glyph inside clean icon tile
     QColor glyphColor = selected ? theme.brandPink : theme.iconPrimary;

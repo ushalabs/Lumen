@@ -28,12 +28,13 @@ public:
                                 const QColor& strokeColor,
                                 qreal strokeWidth = 1.6);
 
-    // Renders a clean, restrained 18x18 vector file-type icon (document, PDF, spreadsheet, code, image).
+    // Renders a clean, restrained 18x18 vector file-type or folder icon (document, PDF, spreadsheet, code, image, folder).
     static void paintFileTypeIcon(QPainter* painter,
                                   const QRectF& targetRect,
                                   const QString& extensionLower,
                                   bool darkTheme = false,
-                                  bool selected = false);
+                                  bool selected = false,
+                                  bool isDirectory = false);
 
     // Renders clean action & utility vector icons for the streamlined preview panel.
     static void paintFolderIcon(QPainter* painter, const QRectF& targetRect, const QColor& color);

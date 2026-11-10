@@ -316,7 +316,39 @@ IndexingStatistics FileIndexer::runScanAndReconcile(const QStringList& watchedRo
 
                 if ((attrs & FILE_ATTRIBUTE_DIRECTORY) != 0) {
                     if (!ignoredSet.contains(entryNameLower)) {
-                        dirStack.append(currentDir + QLatin1Char('\\') + entryName);
+                        const QString dirFullPath = currentDir + QLatin1Char('\\') + entryName;
+                        dirStack.append(dirFullPath);
+
+                        const qint64 dirMtime = fileTimeToUnixSeconds(findData.ftLastWriteTime);
+                        auto existingIt = existingMap.find(dirFullPath);
+                        bool skipDirUpsert = false;
+                        if (existingIt != existingMap.end()) {
+                            const database::ExistingFileMeta existingMeta = existingIt.value();
+                            existingMap.erase(existingIt);
+                            if (existingMeta.isDir && existingMeta.mtime == dirMtime) {
+                                skipDirUpsert = true;
+                            }
+                        }
+
+                        if (!skipDirUpsert) {
+                            ++stats.filesEnumerated;
+                            database::FileRecord dirRec;
+                            dirRec.path = dirFullPath;
+                            dirRec.name = entryName;
+                            dirRec.size = 0;
+                            dirRec.mtime = dirMtime;
+                            dirRec.usn = volumeUsn;
+                            dirRec.isDir = true;
+
+                            pendingUpserts.append(std::move(dirRec));
+                            if (pendingUpserts.size() >= kBatchTransactionSize) {
+                                if (db.upsertFileBatch(pendingUpserts, &m_cancelRequested)) {
+                                    stats.filesUpserted += pendingUpserts.size();
+                                }
+                                pendingUpserts.clear();
+                                emit indexingProgress(stats.filesEnumerated);
+                            }
+                        }
                     }
                     continue;
                 }
@@ -662,8 +694,20 @@ void FileIndexer::applyIncrementalChanges(const QVector<FileChangeEvent>& events
                     db.removeFileByPath(oldClean);
                     break;
                 }
+                WIN32_FILE_ATTRIBUTE_DATA attrData{};
+                const bool isDir = GetFileAttributesExW(
+                                       cleanPath.toStdWString().c_str(),
+                                       GetFileExInfoStandard,
+                                       &attrData) &&
+                                   ((attrData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0);
+                if (isDir && m_ignoredLower.contains(newName.toLower())) {
+                    db.removeFileByPath(oldClean);
+                    break;
+                }
                 QString newExt;
-                extractNameAndExtension(newName, &newExt);
+                if (!isDir) {
+                    extractNameAndExtension(newName, &newExt);
+                }
                 db.renamePath(oldClean, cleanPath, newName, newExt);
                 break;
             }
@@ -678,6 +722,17 @@ void FileIndexer::applyIncrementalChanges(const QVector<FileChangeEvent>& events
                     break;
                 }
                 if ((attrData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+                    const QString dirName = QFileInfo(cleanPath).fileName();
+                    if (m_ignoredLower.contains(dirName.toLower())) {
+                        break;
+                    }
+                    database::FileRecord dirRec;
+                    dirRec.path = cleanPath;
+                    dirRec.name = dirName;
+                    dirRec.size = 0;
+                    dirRec.mtime = fileTimeToUnixSeconds(attrData.ftLastWriteTime);
+                    dirRec.isDir = true;
+                    upserts.append(std::move(dirRec));
                     runScanAndReconcile({cleanPath}, QStringList(m_ignoredLower.begin(), m_ignoredLower.end()));
                     hasEligibleDocChange = true;
                     break;

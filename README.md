@@ -101,13 +101,13 @@ Search your personal knowledge base using natural language descriptions, high-le
 
 ### 5. Search Modes & Summary Actions
 
-Navigate between `All`, `Files`, `Content`, and `Semantic` scopes via click or `Tab`, inspect document summaries, and act directly from the keyboard or right-hand action bar (`Open`, `Reveal`, `Related`, `Pin`).
+Navigate between `All`, `Files`, `Folders`, `Content`, and `Semantic` scopes via click or `Tab`, inspect file or folder summaries, and act directly from the keyboard or right-hand action bar (`Open`, `Reveal`, `Related`, `Pin`).
 
 <div align="center">
   <img src="docs/screenshots/quick_preview_and_modes.png" alt="Lumen Summary & Search Modes" width="760" />
 </div>
 
-- **Clean Mode Navigation:** Switch between `All`, `Files`, `Content`, and `Semantic` modes via mouse click or `Tab` / `Shift+Tab`.
+- **Clean Mode Navigation:** Switch between `All`, `Files`, `Folders`, `Content`, and `Semantic` modes via mouse click or `Tab` / `Shift+Tab` (supports inline `type:folder` / `mode:folders`).
 - **Inline Filter Syntax:** Narrow your search directly in the query field (`ext:pdf`, `type:doc`, `in:Finance`, `size:>1mb`, `modified:7d`).
 - **Keyboard-First Actions:** `Enter` opens, `Ctrl+Enter` reveals in File Explorer, `Ctrl+R` finds related documents, `Ctrl+D` pins favorites, and `Ctrl+Shift+C` copies paths.
 

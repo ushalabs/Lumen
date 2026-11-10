@@ -29,6 +29,7 @@ public:
         MatchTypeRole,
         SemanticSimilarityRole,
         IsPinnedRole,
+        IsDirectoryRole,
         GroupHeaderTitleRole,
         GroupHeaderCountRole
     };

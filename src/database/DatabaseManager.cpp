@@ -370,6 +370,48 @@ bool DatabaseManager::applyMigrationsUnlocked() {
             executeSqlUnlocked("ROLLBACK;");
             return false;
         }
+        currentVersion = 3;
+    }
+
+    if (currentVersion < 4) {
+        const char* migrationV4Sql =
+            "BEGIN IMMEDIATE TRANSACTION;"
+            "ALTER TABLE files ADD COLUMN is_dir INTEGER NOT NULL DEFAULT 0;"
+            "CREATE INDEX IF NOT EXISTS idx_files_is_dir ON files(is_dir);";
+
+        if (!executeSqlUnlocked(migrationV4Sql)) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+
+        ScopedStmt insertVerStmt;
+        const char* insertVerSql =
+            "INSERT INTO schema_migrations(version, applied_at, description) VALUES (?1, ?2, ?3);";
+        if (sqlite3_prepare_v2(m_db, insertVerSql, -1, insertVerStmt.receive(), nullptr) != SQLITE_OK) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+
+        const qint64 nowEpoch = QDateTime::currentSecsSinceEpoch();
+        sqlite3_bind_int(insertVerStmt.get(), 1, 4);
+        sqlite3_bind_int64(insertVerStmt.get(), 2, nowEpoch);
+        sqlite3_bind_text(insertVerStmt.get(),
+                          3,
+                          "Phase 5 directory/folder indexing schema (is_dir)",
+                          -1,
+                          SQLITE_STATIC);
+
+        if (sqlite3_step(insertVerStmt.get()) != SQLITE_DONE) {
+            insertVerStmt.reset();
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+        insertVerStmt.reset();
+
+        if (!executeSqlUnlocked("COMMIT;")) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
     }
 
     return true;
@@ -529,7 +571,7 @@ QHash<QString, ExistingFileMeta> DatabaseManager::queryExistingFilesUnderRoot(co
     upperBound[upperBound.size() - 1] = QLatin1Char(']');
 
     const char* sql =
-        "SELECT id, path, size, mtime FROM files WHERE path >= ?1 AND path < ?2;";
+        "SELECT id, path, size, mtime, is_dir FROM files WHERE path >= ?1 AND path < ?2;";
     ScopedStmt stmt;
     if (sqlite3_prepare_v2(m_db, sql, -1, stmt.receive(), nullptr) != SQLITE_OK) {
         return result;
@@ -546,6 +588,7 @@ QHash<QString, ExistingFileMeta> DatabaseManager::queryExistingFilesUnderRoot(co
         const char* rawPath = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 1));
         meta.size = sqlite3_column_int64(stmt.get(), 2);
         meta.mtime = sqlite3_column_int64(stmt.get(), 3);
+        meta.isDir = (sqlite3_column_int(stmt.get(), 4) != 0);
         if (rawPath != nullptr) {
             result.insert(QString::fromUtf8(rawPath), meta);
         }
@@ -569,17 +612,19 @@ bool DatabaseManager::upsertFileBatch(const QVector<FileRecord>& records,
     }
 
     const char* sql =
-        "INSERT INTO files(path, name, extension, size, mtime, usn) "
-        "VALUES (?1, ?2, ?3, ?4, ?5, ?6) "
+        "INSERT INTO files(path, name, extension, size, mtime, usn, is_dir) "
+        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) "
         "ON CONFLICT(path) DO UPDATE SET "
         "    name = excluded.name,"
         "    extension = excluded.extension,"
         "    size = excluded.size,"
         "    mtime = excluded.mtime,"
-        "    usn = excluded.usn "
+        "    usn = excluded.usn,"
+        "    is_dir = excluded.is_dir "
         "WHERE files.mtime != excluded.mtime "
         "   OR files.size != excluded.size "
-        "   OR files.name != excluded.name;";
+        "   OR files.name != excluded.name "
+        "   OR files.is_dir != excluded.is_dir;";
 
     ScopedStmt stmt;
     if (sqlite3_prepare_v2(m_db, sql, -1, stmt.receive(), nullptr) != SQLITE_OK) {
@@ -604,6 +649,7 @@ bool DatabaseManager::upsertFileBatch(const QVector<FileRecord>& records,
         sqlite3_bind_int64(stmt.get(), 4, rec.size);
         sqlite3_bind_int64(stmt.get(), 5, rec.mtime);
         sqlite3_bind_int64(stmt.get(), 6, rec.usn);
+        sqlite3_bind_int(stmt.get(), 7, rec.isDir ? 1 : 0);
 
         const int stepRc = sqlite3_step(stmt.get());
         sqlite3_reset(stmt.get());
@@ -840,7 +886,8 @@ QVector<ContentExtractionCandidate> DatabaseManager::queryCandidatesForContentEx
         "SELECT f.id, f.path, f.extension, f.size, f.mtime "
         "FROM files f "
         "LEFT JOIN document_content dc ON dc.file_id = f.id "
-        "WHERE ((f.extension IN (%1) COLLATE NOCASE AND f.size > 0 AND f.size <= ?1) "
+        "WHERE f.is_dir = 0 "
+        "  AND ((f.extension IN (%1) COLLATE NOCASE AND f.size > 0 AND f.size <= ?1) "
         "   OR (f.extension IN (%2) COLLATE NOCASE AND f.size > 0)) "
         "  AND (dc.file_id IS NULL OR dc.mtime != f.mtime) "
         "ORDER BY f.mtime DESC "

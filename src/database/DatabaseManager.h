@@ -20,12 +20,14 @@ struct FileRecord {
     qint64 size = 0;
     qint64 mtime = 0;
     qint64 usn = 0;
+    bool isDir = false;
 };
 
 struct ExistingFileMeta {
     qint64 id = 0;
     qint64 size = 0;
     qint64 mtime = 0;
+    bool isDir = false;
 };
 
 struct DocumentContentRecord {
@@ -87,7 +89,7 @@ private:
 
 class DatabaseManager {
 public:
-    static constexpr int kCurrentSchemaVersion = 3;
+    static constexpr int kCurrentSchemaVersion = 4;
 
     static DatabaseManager& instance();
 

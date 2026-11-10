@@ -14,8 +14,9 @@ namespace lumen::search {
 enum class SearchMode {
     All = 0,
     Files = 1,
-    Content = 2,
-    Semantic = 3
+    Folders = 2,
+    Content = 3,
+    Semantic = 4
 };
 
 enum class SearchResultMatchType {
@@ -33,6 +34,8 @@ struct SearchFilters {
     qint64 maxSizeBytes = -1;
     qint64 modifiedAfterEpoch = -1;
     bool includeFilenameMatches = true;
+    bool includeFileItems = true;
+    bool includeFolderItems = true;
     bool includeContentMatches = true;
     bool includeSemanticMatches = true;
     float minSemanticSimilarity = 0.28f;
@@ -50,6 +53,7 @@ struct FileSearchResult {
     int matchStart = -1;
     int matchLength = 0;
     bool isPinned = false;
+    bool isDirectory = false;
 
     // Phase 2 & Phase 3 Document Content / Semantic fields
     SearchResultMatchType matchType = SearchResultMatchType::Filename;

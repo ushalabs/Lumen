@@ -159,7 +159,7 @@ QString sectionCategoryName(const search::FileSearchResult& item) {
             return QStringLiteral("CONTENT MATCHES");
         case search::SearchResultMatchType::Filename:
         default:
-            return QStringLiteral("FILES");
+            return item.isDirectory ? QStringLiteral("FOLDERS") : QStringLiteral("FILES");
     }
 }
 
@@ -296,6 +296,7 @@ QVariant SearchResultListModel::data(const QModelIndex& index, int role) const {
         case MatchTypeRole:          return static_cast<int>(item.matchType);
         case SemanticSimilarityRole: return item.semanticSimilarity;
         case IsPinnedRole:           return item.isPinned;
+        case IsDirectoryRole:        return item.isDirectory;
         case GroupHeaderTitleRole:   return (row < m_groupTitles.size()) ? m_groupTitles.at(row) : QString();
         case GroupHeaderCountRole:   return (row < m_groupCounts.size()) ? m_groupCounts.at(row) : 0;
         default:                     return {};
@@ -416,19 +417,20 @@ public:
         const QString snippet = index.data(SearchResultListModel::SnippetRole).toString();
         const int matchedPage = index.data(SearchResultListModel::MatchedPageRole).toInt();
         const bool isPinned = index.data(SearchResultListModel::IsPinnedRole).toBool();
+        const bool isDirectory = index.data(SearchResultListModel::IsDirectoryRole).toBool();
 
-        // 1. Left 32x32 rounded file icon tile
+        // 1. Left 32x32 rounded file or folder icon tile
         const QRectF iconBox(cardRect.left() + 12.0, cardRect.top() + 10.0, 32.0, 32.0);
-        BrandingIcon::paintFileTypeIcon(painter, iconBox, ext, false, isSelected);
+        BrandingIcon::paintFileTypeIcon(painter, iconBox, ext, false, isSelected, isDirectory);
 
         const qreal textLeft = iconBox.right() + 11.0;
         const qreal rightMargin = cardRect.right() - 12.0;
         const qreal availWidth = std::max(80.0, rightMargin - textLeft);
 
-        // 2. Right-side file size in smaller muted gray (#6E6E6E)
+        // 2. Right-side file size (or Folder badge) in smaller muted gray (#6E6E6E)
         const QFont sizeFont = ThemeTokens::makeFont(11, QFont::Normal);
         const QFontMetrics fmSize(sizeFont);
-        const QString sizeStr = formatHumanSize(fileSize);
+        const QString sizeStr = isDirectory ? QStringLiteral("Folder") : formatHumanSize(fileSize);
         const int sizeW = fmSize.horizontalAdvance(sizeStr) + 6;
         painter->setFont(sizeFont);
         painter->setPen(theme.textSecondary);
@@ -619,7 +621,7 @@ void SearchPopupWidget::setSearchMode(search::SearchMode mode) {
 
 void SearchPopupWidget::cycleSearchMode(bool forward) {
     const int cur = static_cast<int>(m_searchMode);
-    const int next = forward ? ((cur + 1) % 4) : ((cur + 3) % 4);
+    const int next = forward ? ((cur + 1) % 5) : ((cur + 4) % 5);
     setSearchMode(static_cast<search::SearchMode>(next));
 }
 
@@ -754,9 +756,9 @@ void SearchPopupWidget::updateListLayout() {
 }
 
 QRectF SearchPopupWidget::modePillRect(int modeIndex) const {
-    static const int widths[4] = {74, 68, 84, 90};
+    static const int widths[5] = {54, 60, 74, 78, 86};
     qreal x = 18.0;
-    for (int i = 0; i < modeIndex && i < 4; ++i) {
+    for (int i = 0; i < modeIndex && i < 5; ++i) {
         x += widths[i] + 4.0;
     }
     return QRectF(x, 9.0, widths[modeIndex], 26.0);
@@ -828,7 +830,7 @@ void SearchPopupWidget::mouseMoveEvent(QMouseEvent* event) {
 
     int newModeHover = -1;
     if (pos.y() <= kHeaderHeight && m_relatedSourceFileName.isEmpty()) {
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 5; ++i) {
             if (modePillRect(i).contains(pos)) {
                 newModeHover = i;
                 break;
@@ -854,8 +856,10 @@ void SearchPopupWidget::mouseMoveEvent(QMouseEvent* event) {
         needUpdate = true;
 
         if (m_hoveredActionIdx >= 0) {
-            static const QString kTips[4] = {
-                QStringLiteral("Open file (Enter)"),
+            const auto* sel = selectedResult();
+            const bool isDir = (sel != nullptr && sel->isDirectory);
+            const QString kTips[4] = {
+                isDir ? QStringLiteral("Open folder (Enter)") : QStringLiteral("Open file (Enter)"),
                 QStringLiteral("Reveal in File Explorer (Ctrl+Enter)"),
                 QStringLiteral("Find related documents (Ctrl+R)"),
                 QStringLiteral("Pin / Unpin favorite (Ctrl+D)")
@@ -897,7 +901,7 @@ void SearchPopupWidget::mousePressEvent(QMouseEvent* event) {
                     return;
                 }
             } else {
-                for (int i = 0; i < 4; ++i) {
+                for (int i = 0; i < 5; ++i) {
                     if (modePillRect(i).contains(pos)) {
                         setSearchMode(static_cast<search::SearchMode>(i));
                         event->accept();
@@ -962,7 +966,9 @@ void SearchPopupWidget::showContextMenuAt(const QPoint& localPos, const search::
              theme.brandPinkSelected.name(),
              theme.borderSubtle.name()));
 
-    QAction* openAct = menu.addAction(QStringLiteral("Open File\tEnter"));
+    QAction* openAct = menu.addAction(item.isDirectory
+                                          ? QStringLiteral("Open Folder\tEnter")
+                                          : QStringLiteral("Open File\tEnter"));
     QAction* revealAct = menu.addAction(QStringLiteral("Reveal in File Explorer\tCtrl+Enter"));
     QAction* previewAct = menu.addAction(m_previewVisible
                                              ? QStringLiteral("Compact Summary View\tCtrl+P")
@@ -1038,19 +1044,20 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
         painter.setPen(theme.textPrimary);
         painter.drawText(backRect, Qt::AlignCenter, QStringLiteral("← Back"));
     } else {
-        const QRectF trackRect(14.0, 5.0, 336.0, 34.0);
+        const QRectF trackRect(14.0, 5.0, 376.0, 34.0);
         painter.setPen(QPen(theme.borderSubtle, 1.0));
         painter.setBrush(theme.elevatedBackground);
         painter.drawRoundedRect(trackRect, 9.0, 9.0);
 
-        static const QString kModeLabels[4] = {
+        static const QString kModeLabels[5] = {
             QStringLiteral("All"),
             QStringLiteral("Files"),
+            QStringLiteral("Folders"),
             QStringLiteral("Content"),
             QStringLiteral("Semantic")
         };
 
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 5; ++i) {
             const QRectF pRect = modePillRect(i);
             const bool active = (static_cast<int>(m_searchMode) == i);
             const bool hovered = (m_hoveredModeIdx == i);
@@ -1134,9 +1141,9 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
             const qreal contentWidth = inspRect.width() - pad * 2.0;
             const QString extLower = sel->extension.toLower();
 
-            // A. Typographic Hierarchy: Larger Bold Filename + Muted File Type Subtitle
+            // A. Typographic Hierarchy: Larger Bold Filename + Muted File/Folder Type Subtitle
             const QRectF hdrIconRect(contentLeft, inspRect.top() + 18.0, 44.0, 44.0);
-            BrandingIcon::paintFileTypeIcon(&painter, hdrIconRect, extLower, false, true);
+            BrandingIcon::paintFileTypeIcon(&painter, hdrIconRect, extLower, false, true, sel->isDirectory);
 
             const qreal titleLeft = hdrIconRect.right() + 14.0;
             const qreal titleAvailW = inspRect.right() - pad - titleLeft;
@@ -1154,7 +1161,7 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
             painter.setPen(theme.textSecondary);
             painter.drawText(QRectF(titleLeft, inspRect.top() + 42.0, titleAvailW, 18.0),
                              Qt::AlignLeft | Qt::AlignVCenter,
-                             humanReadableFileType(extLower));
+                             sel->isDirectory ? QStringLiteral("File Folder") : humanReadableFileType(extLower));
 
             const qreal hdrBottom = inspRect.top() + 78.0;
             painter.setPen(QPen(theme.borderSubtle, 1.0));
@@ -1222,8 +1229,8 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
             };
 
             drawMetaCard(QRectF(contentLeft, gridTop, cellW, cellH),
-                         QStringLiteral("Size"),
-                         formatHumanSize(sel->size));
+                         sel->isDirectory ? QStringLiteral("Kind") : QStringLiteral("Size"),
+                         sel->isDirectory ? QStringLiteral("Folder") : formatHumanSize(sel->size));
 
             drawMetaCard(QRectF(contentLeft + cellW + 12.0, gridTop, cellW, cellH),
                          QStringLiteral("Modified"),
@@ -1257,7 +1264,9 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
             const QRectF passageRect = summaryBoxRect.adjusted(14.0, 12.0, -14.0, -12.0);
             QString bodyText = !m_previewText.isEmpty() ? m_previewText : sel->snippet;
             if (bodyText.isEmpty()) {
-                bodyText = QStringLiteral("No text summary available for this file.");
+                bodyText = sel->isDirectory
+                               ? QStringLiteral("Folder contents preview unavailable.")
+                               : QStringLiteral("No text summary available for this file.");
             }
             bodyText.replace(QChar(0x00AB), QString());
             bodyText.replace(QChar(0x00BB), QString());

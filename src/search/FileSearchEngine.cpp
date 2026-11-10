@@ -9,6 +9,7 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QDirIterator>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
@@ -42,6 +43,16 @@ QString extractParentDir(const QString& fullNativePath) {
 }
 
 bool passesMetadataFilters(const FileSearchResult& item, const SearchFilters& filters) {
+    if (item.isDirectory && !filters.includeFolderItems) {
+        return false;
+    }
+    if (!item.isDirectory && !filters.includeFileItems) {
+        return false;
+    }
+    if (item.isDirectory &&
+        (!filters.extensions.isEmpty() || filters.minSizeBytes >= 0 || filters.maxSizeBytes >= 0)) {
+        return false;
+    }
     if (!filters.extensions.isEmpty()) {
         bool extMatch = false;
         for (const QString& ext : filters.extensions) {
@@ -228,21 +239,36 @@ SearchFilters FileSearchEngine::filtersForSearchMode(SearchMode mode,
     switch (mode) {
         case SearchMode::All:
             f.includeFilenameMatches = true;
+            f.includeFileItems = true;
+            f.includeFolderItems = true;
             f.includeContentMatches = true;
             f.includeSemanticMatches = true;
             break;
         case SearchMode::Files:
             f.includeFilenameMatches = true;
+            f.includeFileItems = true;
+            f.includeFolderItems = false;
+            f.includeContentMatches = false;
+            f.includeSemanticMatches = false;
+            break;
+        case SearchMode::Folders:
+            f.includeFilenameMatches = true;
+            f.includeFileItems = false;
+            f.includeFolderItems = true;
             f.includeContentMatches = false;
             f.includeSemanticMatches = false;
             break;
         case SearchMode::Content:
             f.includeFilenameMatches = false;
+            f.includeFileItems = true;
+            f.includeFolderItems = false;
             f.includeContentMatches = true;
             f.includeSemanticMatches = false;
             break;
         case SearchMode::Semantic:
             f.includeFilenameMatches = false;
+            f.includeFileItems = true;
+            f.includeFolderItems = false;
             f.includeContentMatches = false;
             f.includeSemanticMatches = true;
             break;
@@ -319,6 +345,9 @@ QString FileSearchEngine::parseInlineQueryAndFilters(const QString& rawQuery,
                        t == QStringLiteral("sheets") || t == QStringLiteral("excel")) {
                 active.extensions.append(extraction::DocumentExtractor::spreadsheetExtensions());
                 active.extensions.append(QStringLiteral("xls"));
+            } else if (t == QStringLiteral("folder") || t == QStringLiteral("folders") ||
+                       t == QStringLiteral("dir") || t == QStringLiteral("dirs")) {
+                active = filtersForSearchMode(SearchMode::Folders, active);
             }
             continue;
         }
@@ -364,12 +393,23 @@ QString FileSearchEngine::parseInlineQueryAndFilters(const QString& rawQuery,
             const QString m = part.mid(5).trimmed().toLower();
             if (m == QStringLiteral("files") || m == QStringLiteral("file")) {
                 active = filtersForSearchMode(SearchMode::Files, active);
+            } else if (m == QStringLiteral("folders") || m == QStringLiteral("folder") ||
+                       m == QStringLiteral("dirs") || m == QStringLiteral("dir")) {
+                active = filtersForSearchMode(SearchMode::Folders, active);
             } else if (m == QStringLiteral("content")) {
                 active = filtersForSearchMode(SearchMode::Content, active);
             } else if (m == QStringLiteral("semantic") || m == QStringLiteral("sem")) {
                 active = filtersForSearchMode(SearchMode::Semantic, active);
             } else if (m == QStringLiteral("all")) {
                 active = filtersForSearchMode(SearchMode::All, active);
+            }
+            continue;
+        }
+        if (part.startsWith(QStringLiteral("folders:"), Qt::CaseInsensitive)) {
+            active = filtersForSearchMode(SearchMode::Folders, active);
+            const QString rest = part.mid(8).trimmed();
+            if (!rest.isEmpty()) {
+                remainingWords.append(rest);
             }
             continue;
         }
@@ -486,6 +526,7 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
         const char* rawExt = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
         item.size = sqlite3_column_int64(stmt, 4);
         item.mtime = sqlite3_column_int64(stmt, 5);
+        item.isDirectory = (sqlite3_column_int(stmt, 6) != 0);
 
         item.path = rawPath ? QString::fromUtf8(rawPath) : QString();
         item.name = rawName ? QString::fromUtf8(rawName) : QString();
@@ -509,17 +550,29 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
         }
     };
 
+    QString dirOnlyClause;
+    QString dirJoinClause;
+    if (activeFilters.includeFolderItems && !activeFilters.includeFileItems) {
+        dirOnlyClause = QStringLiteral(" AND is_dir = 1");
+        dirJoinClause = QStringLiteral(" AND f.is_dir = 1");
+    } else if (activeFilters.includeFileItems && !activeFilters.includeFolderItems) {
+        dirOnlyClause = QStringLiteral(" AND is_dir = 0");
+        dirJoinClause = QStringLiteral(" AND f.is_dir = 0");
+    }
+
     // Pass 1: B-tree index prefix lookup on idx_files_name (handles 1-2 char queries AND guarantees exact/prefix hits)
     const QString firstToken = queryTokensLower.isEmpty() ? effectiveQueryLower : queryTokensLower.first();
     if (activeFilters.includeFilenameMatches && !firstToken.isEmpty()) {
         const QString upperBound = firstToken + QChar(0xFFFF);
-        const char* prefixSql =
-            "SELECT id, path, name, extension, size, mtime "
+        const QByteArray prefixSql = QStringLiteral(
+            "SELECT id, path, name, extension, size, mtime, is_dir "
             "FROM files "
-            "WHERE name >= ?1 AND name <= ?2 COLLATE NOCASE "
-            "LIMIT ?3;";
+            "WHERE name >= ?1 AND name <= ?2 COLLATE NOCASE%1 "
+            "LIMIT ?3;")
+                                         .arg(dirOnlyClause)
+                                         .toUtf8();
         database::ScopedStmt stmt;
-        if (sqlite3_prepare_v2(m_readDb, prefixSql, -1, stmt.receive(), nullptr) == SQLITE_OK) {
+        if (sqlite3_prepare_v2(m_readDb, prefixSql.constData(), -1, stmt.receive(), nullptr) == SQLITE_OK) {
             const QByteArray lowerUtf8 = firstToken.toUtf8();
             const QByteArray upperUtf8 = upperBound.toUtf8();
             sqlite3_bind_text(stmt.get(), 1, lowerUtf8.constData(), lowerUtf8.size(), SQLITE_STATIC);
@@ -536,14 +589,16 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
     if (activeFilters.includeFilenameMatches && !ftsTrigTokens.isEmpty() &&
         (!cancellationToken || !cancellationToken->load(std::memory_order_relaxed))) {
         const QString matchExpr = ftsTrigTokens.join(QStringLiteral(" AND "));
-        const char* ftsSql =
-            "SELECT f.id, f.path, f.name, f.extension, f.size, f.mtime "
+        const QByteArray ftsSql = QStringLiteral(
+            "SELECT f.id, f.path, f.name, f.extension, f.size, f.mtime, f.is_dir "
             "FROM files_fts "
             "JOIN files f ON f.id = files_fts.rowid "
-            "WHERE files_fts MATCH ?1 "
-            "LIMIT ?2;";
+            "WHERE files_fts MATCH ?1%1 "
+            "LIMIT ?2;")
+                                      .arg(dirJoinClause)
+                                      .toUtf8();
         database::ScopedStmt ftsStmt;
-        if (sqlite3_prepare_v2(m_readDb, ftsSql, -1, ftsStmt.receive(), nullptr) == SQLITE_OK) {
+        if (sqlite3_prepare_v2(m_readDb, ftsSql.constData(), -1, ftsStmt.receive(), nullptr) == SQLITE_OK) {
             const QByteArray matchUtf8 = matchExpr.toUtf8();
             sqlite3_bind_text(ftsStmt.get(), 1, matchUtf8.constData(), matchUtf8.size(), SQLITE_STATIC);
             sqlite3_bind_int(ftsStmt.get(), 2, ftsFetchLimit);
@@ -555,13 +610,14 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
     }
 
     // Pass 3: If user filtered strictly by extension (e.g. "ext:pdf") with no filename tokens
-    if (activeFilters.includeFilenameMatches && queryTokensLower.isEmpty() && !activeFilters.extensions.isEmpty() &&
+    if (activeFilters.includeFilenameMatches && activeFilters.includeFileItems &&
+        queryTokensLower.isEmpty() && !activeFilters.extensions.isEmpty() &&
         (!cancellationToken || !cancellationToken->load(std::memory_order_relaxed))) {
         const QString extTarget = activeFilters.extensions.first();
         const char* extSql =
-            "SELECT id, path, name, extension, size, mtime "
+            "SELECT id, path, name, extension, size, mtime, is_dir "
             "FROM files "
-            "WHERE extension = ?1 COLLATE NOCASE "
+            "WHERE extension = ?1 COLLATE NOCASE AND is_dir = 0 "
             "LIMIT ?2;";
         database::ScopedStmt extStmt;
         if (sqlite3_prepare_v2(m_readDb, extSql, -1, extStmt.receive(), nullptr) == SQLITE_OK) {
@@ -760,20 +816,25 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
         }
     }
 
-    // Pass 6: Filter-only query fallback (e.g. "ext:pdf", "type:doc", "modified:today", "size:>100kb")
+    // Pass 6: Filter-only query fallback (e.g. "ext:pdf", "type:doc", "type:folder", "modified:today")
     if (queryTokensLower.isEmpty() && candidateMap.isEmpty()) {
-        const bool hasMetadataFilter = !activeFilters.extensions.isEmpty() ||
+        const bool folderModeOnly = (activeFilters.includeFolderItems && !activeFilters.includeFileItems);
+        const bool hasMetadataFilter = folderModeOnly ||
+                                       !activeFilters.extensions.isEmpty() ||
                                        !activeFilters.pathPrefix.isEmpty() ||
                                        activeFilters.minSizeBytes >= 0 ||
                                        activeFilters.maxSizeBytes >= 0 ||
                                        activeFilters.modifiedAfterEpoch >= 0;
         if (hasMetadataFilter) {
-            const char* filterSql =
-                "SELECT id, path, name, extension, size, mtime "
+            const QByteArray filterSql = QStringLiteral(
+                "SELECT id, path, name, extension, size, mtime, is_dir "
                 "FROM files "
-                "ORDER BY mtime DESC LIMIT ?1;";
+                "WHERE 1=1%1 "
+                "ORDER BY mtime DESC LIMIT ?1;")
+                                             .arg(dirOnlyClause)
+                                             .toUtf8();
             database::ScopedStmt filterStmt;
-            if (sqlite3_prepare_v2(m_readDb, filterSql, -1, filterStmt.receive(), nullptr) == SQLITE_OK) {
+            if (sqlite3_prepare_v2(m_readDb, filterSql.constData(), -1, filterStmt.receive(), nullptr) == SQLITE_OK) {
                 sqlite3_bind_int(filterStmt.get(), 1, std::max(limit * 8, 400));
                 while (sqlite3_step(filterStmt.get()) == SQLITE_ROW) {
                     const qint64 fid = sqlite3_column_int64(filterStmt.get(), 0);
@@ -784,6 +845,7 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
                     const char* rawExt = reinterpret_cast<const char*>(sqlite3_column_text(filterStmt.get(), 3));
                     item.size = sqlite3_column_int64(filterStmt.get(), 4);
                     item.mtime = sqlite3_column_int64(filterStmt.get(), 5);
+                    item.isDirectory = (sqlite3_column_int(filterStmt.get(), 6) != 0);
                     item.path = rawPath ? QString::fromUtf8(rawPath) : QString();
                     item.name = rawName ? QString::fromUtf8(rawName) : QString();
                     item.extension = rawExt ? QString::fromUtf8(rawExt) : QString();
@@ -1035,7 +1097,44 @@ QString FileSearchEngine::fetchDocumentPreviewText(qint64 fileId,
         return {};
     }
     const QFileInfo fi(filePath);
-    if (!fi.exists() || !fi.isFile()) {
+    if (!fi.exists()) {
+        return QStringLiteral("Item is no longer present on disk.");
+    }
+    if (fi.isDir()) {
+        QDirIterator it(filePath, QDir::AllEntries | QDir::NoDotAndDotDot);
+        int folderCount = 0;
+        int fileCount = 0;
+        bool truncated = false;
+        QStringList childNames;
+        while (it.hasNext()) {
+            it.next();
+            const QFileInfo entry = it.fileInfo();
+            if (entry.isDir()) {
+                ++folderCount;
+            } else {
+                ++fileCount;
+            }
+            if (childNames.size() < 14) {
+                childNames.append(entry.fileName());
+            }
+            if (folderCount + fileCount >= 120) {
+                truncated = true;
+                break;
+            }
+        }
+        if (folderCount == 0 && fileCount == 0) {
+            return QStringLiteral("Empty Folder");
+        }
+        const QString suffix = truncated ? QStringLiteral("+") : QString();
+        return QStringLiteral("Folder · %1%2 subfolder%3, %4%2 file%5\nContains: %6")
+            .arg(folderCount)
+            .arg(suffix)
+            .arg(folderCount == 1 ? QString() : QStringLiteral("s"))
+            .arg(fileCount)
+            .arg(fileCount == 1 ? QString() : QStringLiteral("s"))
+            .arg(childNames.join(QStringLiteral(", ")));
+    }
+    if (!fi.isFile()) {
         return QStringLiteral("File is no longer present on disk.");
     }
 
