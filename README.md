@@ -4,6 +4,7 @@
   Lumen
   </h1>
 
+<p align="center">
 ### Lightweight Offline Intelligent Search for Windows
 
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078D4?style=flat-square&logo=windows)](https://github.com/ushalabs/Lumen)
@@ -14,9 +15,7 @@
 [![Installer](https://img.shields.io/badge/Installer-NSIS%20Setup%20(x64%20v0.5.1)-EC1680?style=flat-square&logo=windows11)](#installation-windows-10--11-x64)
 [![Privacy](https://img.shields.io/badge/Privacy-100%25%20Offline-10B981?style=flat-square)](https://github.com/ushalabs/Lumen)
 
-**Sole Developer: [UshaLabs](https://github.com/ushalabs)**
-
-</div>
+</p>
 
 ---
 
