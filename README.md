@@ -11,7 +11,7 @@
 [![UI](https://img.shields.io/badge/UI-Qt%206%20Widgets%20%2B%20Win32-41CD52?style=flat-square&logo=qt)](https://www.qt.io/)
 [![Database](https://img.shields.io/badge/Database-SQLite%203%20(WAL%20%2B%20FTS5)-003B57?style=flat-square&logo=sqlite)](https://www.sqlite.org/)
 [![AI](https://img.shields.io/badge/AI-ONNX%20Runtime%20CPU%20(MiniLM%20INT8)-8B5CF6?style=flat-square)](https://onnxruntime.ai/)
-[![Package](https://img.shields.io/badge/Package-Windows%20MSIX-0078D7?style=flat-square&logo=windows11)](https://github.com/ushalabs/Lumen)
+[![Installer](https://img.shields.io/badge/Installer-NSIS%20%2B%20MSIX%20(x64)-0078D7?style=flat-square&logo=windows11)](https://github.com/ushalabs/Lumen)
 [![Privacy](https://img.shields.io/badge/Privacy-100%25%20Offline-10B981?style=flat-square)](https://github.com/ushalabs/Lumen)
 
 **Developed with precision by [UshaLabs](https://github.com/ushalabs)**
@@ -42,31 +42,30 @@ Built to follow the visual identity and design language of **UshaLabs Downshift*
 
 ### 1. Persistent Desktop Search Bar
 
-The search bar is Lumen's primary entry point. Designed as a sleek, rounded pill docked to the upper-right corner of your desktop, it rests permanently on the Windows wallpaper surface without occluding open windows or interrupting your active workspace.
+The search bar is Lumen's primary entry point. Designed as a calm, native Windows surface (`460 × 52` px) docked to the upper-right corner of your desktop, it rests permanently on the Windows wallpaper without occluding open windows or interrupting your active workspace.
 
 <div align="center">
-  <img src="docs/screenshots/desktop_search_bar.png" alt="Lumen Desktop Search Bar — Idle State" width="680" />
+  <img src="docs/screenshots/desktop_search_bar.png" alt="Lumen Desktop Search Bar — Idle State" width="460" />
 </div>
 
 - **Unobtrusive Desktop Docking:** Anchored using Win32 `HWND_BOTTOM` integration so it stays comfortably behind active windows.
 - **`Win+D` (Show Desktop) Resilient:** Listens to shell minimize events through a low-overhead WinEvent hook, remaining visible and accessible when you switch to your desktop.
 - **Global Hotkey Summoning:** Press `Ctrl+Alt+Space` from inside any game, browser, or full-screen app to instantly summon Lumen into focus.
-- **Downshift Visual Styling:** Refined `#EC1680` pink focus halo, smooth 14px rounded corners, and native typography.
+- **Downshift Visual Identity:** Restrained `#EC1680` pink focus indicator, 12px rounded geometry, minimal vector search icon, and Segoe UI Variable typography.
 
 ---
 
 ### 2. Instant Filename Discovery
 
-Type any keyword, prefix, acronym, or substring to locate files instantly across your entire library. Lumen searches hundreds of thousands of files in single-digit milliseconds.
+Type any keyword, prefix, acronym, or substring to locate files instantly across your entire library. Lumen expands into a spacious `620 px` results panel aligned cleanly with the desktop search bar.
 
 <div align="center">
-  <img src="docs/screenshots/filename_search.png" alt="Lumen Filename Search Results" width="680" />
+  <img src="docs/screenshots/filename_search.png" alt="Lumen Filename Search Results" width="620" />
 </div>
 
 - **Sub-5ms Query Latency:** Backed by SQLite 3.47 WAL mode with dual B-tree exact prefix indexing and FTS5 trigram substring matching.
+- **Calm, Scannable Hierarchy:** Refined monochrome/subtle vector file-type icons, clean breadcrumb folder paths (`Documents / Finance`), and contextual file size and date metadata shown on selection or hover.
 - **Real-Time Filesystem Synchronization:** Monitors folder changes asynchronously via `ReadDirectoryChangesW` non-blocking completion routines, reconciling additions, renames, and deletions in sub-millisecond time.
-- **Smart Relevance Ranking:** Automatically prioritizes exact filename matches, shallow folder hierarchies, and recently modified documents.
-- **Smooth Virtualized Display:** Effortlessly renders large result sets without UI lag or memory spikes.
 
 ---
 
@@ -75,13 +74,13 @@ Type any keyword, prefix, acronym, or substring to locate files instantly across
 Find files by what is written *inside* them—even if you do not remember their filename or folder location.
 
 <div align="center">
-  <img src="docs/screenshots/document_content_search.png" alt="Lumen Document Content Search" width="680" />
+  <img src="docs/screenshots/document_content_search.png" alt="Lumen Document Content Search" width="620" />
 </div>
 
 - **Native Multi-Format Support:** Extracts text directly from Adobe PDF (`.pdf`), Microsoft Word (`.docx`), Markdown (`.md`), plain text (`.txt`, `.log`), and source code files.
 - **Zero Heavy Dependencies:** Implements a standalone RFC 1950/1951 Deflate decompression codec with a strict 16 MB decompression limit for total protection against zip-bombs and malformed streams.
-- **Precise PDF Page Resolution:** Automatically tracks byte offsets and page markers (`/FlateDecode` + `BT...ET`), displaying exact page badges (e.g. `p. 1`) directly in the search results.
-- **BM25 Highlighted Snippets:** Highlights search terms in contextual snippets with Downshift pink accents, allowing you to preview matching text before opening the file.
+- **Precise PDF Page Resolution:** Automatically tracks byte offsets and page markers (`/FlateDecode` + `BT...ET`), displaying subtle page numbers (`Page 2`) directly on matching rows.
+- **BM25 Highlighted Snippets:** Displays a single readable passage line beneath the folder path with matching terms highlighted in Downshift pink.
 
 ---
 
@@ -90,7 +89,7 @@ Find files by what is written *inside* them—even if you do not remember their 
 Search your personal knowledge base using natural language descriptions, high-level concepts, or vague recollections—with **zero keyword overlap**.
 
 <div align="center">
-  <img src="docs/screenshots/semantic_search.png" alt="Lumen Offline Semantic Search" width="680" />
+  <img src="docs/screenshots/semantic_search.png" alt="Lumen Offline Semantic Search" width="620" />
 </div>
 
 - **Local Transformer Model:** Bundles a quantized INT8 `all-MiniLM-L6-v2` embedding model (384-dimensional dense vectors) executed entirely on your CPU via ONNX Runtime.
@@ -100,38 +99,33 @@ Search your personal knowledge base using natural language descriptions, high-le
 
 ---
 
-### 5. Search Modes & Instant Quick Preview
+### 5. Search Modes, Quick Preview & Dark Theme
 
-Navigate your files with dedicated search filters, interactive keyboard navigation, and side-by-side file previews.
+Navigate your files with clean text-tab filters, keyboard-first shortcuts, contextual document previews, and full Light/Dark theme support.
 
 <div align="center">
-  <img src="docs/screenshots/quick_preview_and_modes.png" alt="Lumen Quick Preview & Search Modes" width="680" />
+  <img src="docs/screenshots/quick_preview_and_modes.png" alt="Lumen Quick Preview & Search Modes" width="620" />
 </div>
 
-- **Interactive Search Mode Pills:** Quickly isolate results by toggling `All`, `Files`, `Content`, or `Semantic` modes via mouse click or the `Tab` / `Shift+Tab` keyboard shortcuts.
-- **Inline Filter Syntax:** Narrow your search directly in the query field:
-  - `ext:pdf`, `ext:docx`, `ext:rs` — filter by file extension.
-  - `type:doc`, `type:code`, `type:media` — filter by document category.
-  - `in:Downloads`, `in:Projects` — scope to specific directories.
-  - `size:>10mb`, `size:<500kb` — filter by file size thresholds.
-  - `modified:today`, `modified:thisweek` — filter by modification recency.
-- **Instant Quick Preview (`Ctrl+P`):** Toggle a side-by-side preview panel showing document metadata, full file paths, formatted content snippets, and page references.
-- **Power User Shortcuts:**
-  - `Enter` — Open file in default application.
-  - `Ctrl+Enter` — Reveal file in Windows File Explorer.
-  - `Ctrl+Shift+C` — Copy absolute file path to clipboard.
-  - `Ctrl+R` — Find semantically related documents.
-  - `Ctrl+D` — Toggle pinned favorite status.
-  - Right-click — Open the custom Downshift-styled context menu.
+<br />
+
+<div align="center">
+  <img src="docs/screenshots/dark_theme_search.png" alt="Lumen Dark Theme Search" width="620" />
+</div>
+
+- **Clean Mode Navigation:** Switch between `All`, `Files`, `Content`, and `Semantic` modes via mouse click or `Tab` / `Shift+Tab`.
+- **Inline Filter Syntax:** Narrow your search directly in the query field (`ext:pdf`, `type:doc`, `in:Finance`, `size:>1mb`, `modified:7d`).
+- **Contextual Quick Preview (`Ctrl+P`):** Toggle the preview pane to inspect full filenames, breadcrumb paths, page numbers, extracted document passages, and one-click `Open` and `Reveal in Explorer` actions.
+- **Light, Dark & System Themes:** Automatically follows Windows 11 color scheme preferences or locks to Light or Dark mode.
 
 ---
 
 ### 6. Configuration & Customization
 
-Fine-tune Lumen's indexing locations, appearance, and system behavior through the native settings panel.
+Fine-tune Lumen's indexing locations, appearance, and system behavior through a clean, modern settings window organized into `General`, `Appearance`, `Search & Indexing`, and `Storage & Privacy`.
 
 <div align="center">
-  <img src="docs/screenshots/settings_dialog.png" alt="Lumen Native Settings Dialog" width="460" />
+  <img src="docs/screenshots/settings_dialog.png" alt="Lumen Native Settings Dialog" width="440" />
 </div>
 
 - **Indexed Folders Management:** Add custom storage drives or folders with recursive directory scanning.
@@ -253,25 +247,19 @@ All performance measurements were independently recorded under reproducible cond
 
 ## Installation & Distribution
 
-Lumen is distributed as an official, cryptographically signed Windows MSIX package developed by **UshaLabs**.
+Lumen is distributed as a self-contained **Windows 10/11 NSIS Setup Installer** (`Lumen-v0.5.0-Setup-x64.exe`), a signed **Windows MSIX Package**, and a **Standalone Portable ZIP** developed by **UshaLabs**.
 
-### Option 1: 1-Click Zero-Warning MSIX Installer (Recommended)
+### Option 1: Standalone Windows 10/11 Setup Installer (NSIS — Recommended)
 
-1. Download **`Lumen-v0.5.0-MSIX-Bundle.zip`** from the [Releases](https://github.com/ushalabs/Lumen/releases) page.
-2. Extract the archive contents to any folder.
-3. Right-click **`Install-Lumen.bat`** and select **Run as administrator** (or run `Install-Lumen.ps1`).
-4. The installer automatically registers the official UshaLabs certificate in `TrustedPeople` and installs `Lumen-v0.5.0-x64.msix` directly into Windows.
-5. Windows App Installer will display **"Verified Publisher: UshaLabs"** with **zero security warnings**.
+1. Download **`Lumen-v0.5.0-Setup-x64.exe`** from the [Releases](https://github.com/ushalabs/Lumen/releases) page.
+2. Run the installer (`Per-User` install into `%LOCALAPPDATA%\Programs\Lumen` by default—no Administrator prompt required—or `/ALLUSERS` for machine-wide installation).
+3. Bundles the Qt 6 runtime, MSVC x64 C/C++ runtime DLLs, ONNX Runtime CPU engine, and the `all-MiniLM-L6-v2` semantic model out of the box so it runs on any clean Windows 10 (`1809+`) or Windows 11 x64 PC.
 
-### Option 2: PowerShell Direct Sideloading
+### Option 2: 1-Click Zero-Warning MSIX Installer
 
-```powershell
-# 1. Trust the UshaLabs root certificate for sideloading (current user)
-Import-Certificate -FilePath .\UshaLabs.cer -CertStoreLocation Cert:\CurrentUser\TrustedPeople
-
-# 2. Deploy the MSIX package
-Add-AppxPackage -Path .\Lumen-v0.5.0-x64.msix
-```
+1. Download **`Lumen-v0.5.0-MSIX-Bundle.zip`** from the [Releases](https://github.com/ushalabs/Lumen/releases) page and extract it.
+2. Right-click **`Install-Lumen.bat`** and select **Run as administrator** (or run `Install-Lumen.ps1`).
+3. Registers the UshaLabs certificate in `TrustedPeople` and installs `Lumen-v0.5.0-x64.msix` with **"Verified Publisher: UshaLabs"**.
 
 ### Option 3: Standalone Portable Archive
 
@@ -311,15 +299,24 @@ $env:PATH = "C:\Qt\6.8.2\msvc2022_64\bin;$env:PATH"
 .\build\phase3_benchmark.exe
 ```
 
-### 4. Build MSIX Package & Installer Bundle
+### 4. Build Windows Installers (NSIS & MSIX)
 
 ```powershell
+# Build self-contained NSIS Setup (.exe) + Portable (.zip)
+powershell -ExecutionPolicy Bypass -File packaging\build_setup.ps1 -Version "0.5.0"
+
+# Verify silent install, runtime smoke tests, and clean uninstall
+powershell -ExecutionPolicy Bypass -File packaging\test_setup.ps1
+
+# Build signed MSIX package + bundle
 powershell -ExecutionPolicy Bypass -File packaging\build_msix.ps1 -Version "0.5.0"
 ```
 
 Generates:
+- `dist\Lumen-v0.5.0-Setup-x64.exe` (Self-contained Windows 10/11 NSIS Setup, Publisher: **UshaLabs**)
+- `dist\Lumen-v0.5.0-windows-x64.zip` (Standalone portable archive)
 - `dist\Lumen-v0.5.0-x64.msix` (Signed MSIX package, Publisher: **UshaLabs**)
-- `dist\Lumen-v0.5.0-MSIX-Bundle.zip` (1-click zero-warning installer bundle)
+- `dist\Lumen-v0.5.0-MSIX-Bundle.zip` (1-click zero-warning MSIX installer bundle)
 - `dist\SHA256SUMS.txt` (Cryptographic verification checksums)
 
 ---
