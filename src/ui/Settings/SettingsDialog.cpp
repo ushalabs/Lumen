@@ -44,21 +44,20 @@ public:
 
             if (checked) {
                 painter->setPen(QPen(theme.brandPink, 1.2));
-                painter->setBrush(theme.brandPinkStrongFill);
+                painter->setBrush(QColor(253, 242, 248));
                 painter->drawRoundedRect(r, 4.0, 4.0);
 
-                // Crisp black checkmark on clean light pink fill
                 QPainterPath check;
                 check.moveTo(r.left() + r.width() * 0.24, r.top() + r.height() * 0.52);
                 check.lineTo(r.left() + r.width() * 0.44, r.top() + r.height() * 0.72);
                 check.lineTo(r.left() + r.width() * 0.76, r.top() + r.height() * 0.30);
-                QPen checkPen(theme.textPrimary, 1.9, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+                QPen checkPen(theme.brandPink, 1.9, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
                 painter->setPen(checkPen);
                 painter->setBrush(Qt::NoBrush);
                 painter->drawPath(check);
             } else {
                 painter->setPen(QPen(hovered ? theme.brandPink : theme.borderColor, 1.2));
-                painter->setBrush(theme.surfaceBackground);
+                painter->setBrush(QColor(255, 255, 255));
                 painter->drawRoundedRect(r, 4.0, 4.0);
             }
 
@@ -294,16 +293,16 @@ void SettingsDialog::applyThemeStyles() {
         "QListWidget { background-color: %6; border: 1px solid %7; border-radius: 6px; padding: 4px; color: %2; outline: none; }"
         "QListWidget::item { padding: 3px 6px; border-radius: 4px; }"
         "QListWidget::item:selected { background-color: %10; color: %2; }")
-        .arg(theme.windowBackground.name(),       // %1 Pure White
-             theme.textPrimary.name(),            // %2 Crisp Black
-             theme.textSecondary.name(),          // %3 Dark Charcoal
-             theme.textMuted.name(),              // %4 Muted
-             theme.borderSubtle.name(),           // %5 Hairline pink
-             theme.brandPinkTint.name(),          // %6 Clean soft light pink
-             theme.borderColor.name(),            // %7 Pink border
-             theme.brandPinkSelected.name(),      // %8 Hover light pink
-             theme.brandPink.name(),              // %9 Brand pink border/focus
-             theme.brandPinkStrongFill.name()));  // %10 Selected/Primary light pink fill
+        .arg(QStringLiteral("#FFFFFF"),            // %1 Pure White dialog surface
+             theme.textPrimary.name(),            // %2 Dark text
+             theme.textSecondary.name(),          // %3 Muted gray (#6E6E6E)
+             theme.textMuted.name(),              // %4 Subtle gray
+             QStringLiteral("#EFEFEF"),           // %5 Neutral hairline divider
+             QStringLiteral("#F8F8FA"),           // %6 Calm neutral container/button fill
+             QStringLiteral("#E6E6EB"),           // %7 Subtle neutral border
+             QStringLiteral("#FDF2F8"),           // %8 Soft pastel pink hover
+             theme.brandPink.name(),              // %9 Active focus/brand pink
+             QStringLiteral("#FCE7F3")));         // %10 Active pastel pink primary button fill
 }
 
 void SettingsDialog::loadFromSettings() {

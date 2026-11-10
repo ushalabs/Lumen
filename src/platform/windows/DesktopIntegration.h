@@ -24,6 +24,14 @@ public:
     // Applies toolwindow extended style and removes taskbar presence.
     static void applyDesktopWidgetStyles(HWND hwnd);
 
+    // Enables rounded Windows DWM blur-behind strictly within the physical card bounds.
+    static void updateRoundedBackdropBlur(HWND hwnd,
+                                          int leftPx,
+                                          int topPx,
+                                          int rightPx,
+                                          int bottomPx,
+                                          int radiusPx);
+
     // Places the widget at the bottom of the Z-order so normal/maximized windows cover it.
     static void placeOnDesktopBottom(HWND hwnd);
 

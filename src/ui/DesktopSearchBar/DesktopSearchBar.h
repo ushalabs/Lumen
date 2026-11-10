@@ -19,15 +19,23 @@ class DesktopSearchBar : public QWidget {
     Q_OBJECT
 
 public:
-    static constexpr int kIconSize = 56;
-    static constexpr int kBarWidth = 460;
-    static constexpr int kBarHeight = 56;
-    static constexpr int kPopupWidth = 860;
+    static constexpr int kShadowLeft = 9;
+    static constexpr int kShadowTop = 5;
+    static constexpr int kShadowRight = 9;
+    static constexpr int kShadowBottom = 13;
+    static constexpr int kHorizontalShadow = kShadowLeft + kShadowRight;
+    static constexpr int kVerticalShadow = kShadowTop + kShadowBottom;
+
+    static constexpr int kBarCardHeight = 56;
+    static constexpr int kIconSize = 54 + kHorizontalShadow;          // 72px widget -> 54x54 visible card
+    static constexpr int kBarWidth = 464 + kHorizontalShadow;         // 482px widget -> 464px visible bar
+    static constexpr int kBarHeight = kBarCardHeight + kVerticalShadow; // 74px widget -> 56px visible bar
+    static constexpr int kPopupWidth = 900 + kHorizontalShadow;       // 918px widget -> 900px visible workspace
     static constexpr int kPopupGap = 0;
     static constexpr int kPopupHeight = 140;
     static constexpr int kExpandedHeight = kBarHeight + kPopupGap + kPopupHeight;
-    static constexpr int kRightEdgeMargin = 24;
-    static constexpr int kTopWorkAreaOffset = 48;
+    static constexpr int kRightEdgeMargin = 20;
+    static constexpr int kTopWorkAreaOffset = 44;
 
     explicit DesktopSearchBar(QWidget* parent = nullptr);
     ~DesktopSearchBar() override;
@@ -79,7 +87,9 @@ signals:
 
 protected:
     void paintEvent(QPaintEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
     void showEvent(QShowEvent* event) override;
+    void leaveEvent(QEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
@@ -97,11 +107,13 @@ private:
     void applyOpenBarGeometry();
     void updateExpandedGeometry();
     void updateSearchInputGeometry();
+    void syncNativeBackdropBlur();
     void dispatchAsyncSearch(const QString& trimmedQuery);
     void dispatchRelatedDocumentsSearch(const search::FileSearchResult& sourceResult);
     void dispatchInspectorPreviewFetch(const search::FileSearchResult& result);
     void applyRestingWindowZOrder();
     void bindScreenSignals();
+    QRectF cardRect() const;
     QRectF iconTileRect() const;
     QRectF clearButtonHitRect() const;
 
@@ -120,6 +132,8 @@ private:
     bool m_popupExpanded = false;
     bool m_slidesLeft = true;
     bool m_isSearchActive = false;
+    bool m_clearHovered = false;
+    bool m_iconHovered = false;
     bool m_keepAboveShellTemp = false;
     bool m_alwaysOnTop = false;
     bool m_dragging = false;

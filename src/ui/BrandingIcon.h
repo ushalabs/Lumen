@@ -27,11 +27,18 @@ public:
                                   bool darkTheme = false,
                                   bool selected = false);
 
-    // Renders a small subtle folder icon for secondary path metadata.
+    // Renders clean action & utility vector icons for the streamlined preview panel.
     static void paintFolderIcon(QPainter* painter, const QRectF& targetRect, const QColor& color);
-
-    // Renders a small subtle pin indicator icon.
-    static void paintPinIcon(QPainter* painter, const QRectF& targetRect, const QColor& color);
+    static void paintPinIcon(QPainter* painter,
+                             const QRectF& targetRect,
+                             const QColor& color,
+                             bool filled = false);
+    static void paintExternalOpenIcon(QPainter* painter, const QRectF& targetRect, const QColor& color);
+    static void paintRelatedIcon(QPainter* painter, const QRectF& targetRect, const QColor& color);
+    static void paintClipboardIcon(QPainter* painter,
+                                   const QRectF& targetRect,
+                                   const QColor& color,
+                                   bool copied = false);
 
     // Generates a multi-resolution QIcon for system tray and window titles.
     static QIcon createAppIcon();

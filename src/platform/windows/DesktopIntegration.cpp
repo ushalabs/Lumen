@@ -98,6 +98,53 @@ void DesktopIntegration::applyDesktopWidgetStyles(HWND hwnd) {
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
+void DesktopIntegration::updateRoundedBackdropBlur(HWND hwnd,
+                                                   int leftPx,
+                                                   int topPx,
+                                                   int rightPx,
+                                                   int bottomPx,
+                                                   int radiusPx) {
+    if (hwnd == nullptr || !IsWindow(hwnd) || rightPx <= leftPx || bottomPx <= topPx) {
+        return;
+    }
+
+    struct LocalDwmBlurBehind {
+        DWORD dwFlags;
+        BOOL fEnable;
+        HRGN hRgnBlur;
+        BOOL fTransitionOnMaximized;
+    };
+    using FnDwmEnableBlurBehindWindow = HRESULT(WINAPI*)(HWND, const LocalDwmBlurBehind*);
+
+    static const auto fnBlurBehind = []() -> FnDwmEnableBlurBehindWindow {
+        HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
+        if (!dwm) {
+            return nullptr;
+        }
+        return reinterpret_cast<FnDwmEnableBlurBehindWindow>(
+            GetProcAddress(dwm, "DwmEnableBlurBehindWindow"));
+    }();
+
+    if (!fnBlurBehind) {
+        return;
+    }
+
+    const HRGN roundRgn = CreateRoundRectRgn(leftPx, topPx, rightPx + 1, bottomPx + 1, radiusPx * 2, radiusPx * 2);
+    if (!roundRgn) {
+        return;
+    }
+
+    constexpr DWORD kDwmBbEnable = 0x00000001;
+    constexpr DWORD kDwmBbBlurRegion = 0x00000002;
+    LocalDwmBlurBehind bb{};
+    bb.dwFlags = kDwmBbEnable | kDwmBbBlurRegion;
+    bb.fEnable = TRUE;
+    bb.hRgnBlur = roundRgn;
+    bb.fTransitionOnMaximized = FALSE;
+    fnBlurBehind(hwnd, &bb);
+    DeleteObject(roundRgn);
+}
+
 void DesktopIntegration::placeOnDesktopBottom(HWND hwnd) {
     if (hwnd == nullptr || !IsWindow(hwnd)) {
         return;

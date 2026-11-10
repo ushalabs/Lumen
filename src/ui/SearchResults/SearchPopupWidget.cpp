@@ -23,6 +23,8 @@
 #include <QPen>
 #include <QScrollBar>
 #include <QStyledItemDelegate>
+#include <QTimer>
+#include <QToolTip>
 
 namespace lumen::ui {
 
@@ -210,10 +212,13 @@ void drawHighlightedSnippet(QPainter* painter,
         }
 
         if (seg.highlighted && !drawText.isEmpty()) {
+            // Lightweight pastel wash + thin pink underline (no heavy solid block)
             painter->setPen(Qt::NoPen);
-            painter->setBrush(theme.brandPinkStrongFill);
+            painter->setBrush(QColor(236, 22, 128, 18));
             painter->drawRoundedRect(
                 QRectF(curX - 1.0, rect.top() + 1.0, advance + 2.0, rect.height() - 2.0), 3.0, 3.0);
+            painter->setPen(QPen(QColor(236, 22, 128, 155), 1.3));
+            painter->drawLine(QPointF(curX, rect.bottom() - 2.0), QPointF(curX + advance, rect.bottom() - 2.0));
             painter->setFont(mediumFont);
             painter->setPen(theme.textPrimary);
         } else {
@@ -343,37 +348,37 @@ public:
 
         QRectF fullRect = QRectF(option.rect);
         if (!groupTitle.isEmpty()) {
-            const QRectF hdrRect(fullRect.left() + 14.0,
-                                 fullRect.top() + 4.0,
-                                 fullRect.width() - 28.0,
-                                 SearchPopupWidget::kGroupHeaderExtraHeight - 4.0);
+            const QRectF hdrRect(fullRect.left() + 16.0,
+                                 fullRect.top() + 5.0,
+                                 fullRect.width() - 32.0,
+                                 SearchPopupWidget::kGroupHeaderExtraHeight - 5.0);
             painter->setFont(ThemeTokens::makeFont(10, QFont::Medium));
-            painter->setPen(theme.textSecondary);
+            painter->setPen(theme.textMuted);
             painter->drawText(hdrRect, Qt::AlignLeft | Qt::AlignVCenter, groupTitle);
 
-            painter->setFont(ThemeTokens::makeMonoFont(10, QFont::Normal));
+            painter->setFont(ThemeTokens::makeFont(10, QFont::Normal));
             painter->setPen(theme.textMuted);
             painter->drawText(hdrRect, Qt::AlignRight | Qt::AlignVCenter, QString::number(groupCount));
 
             fullRect.setTop(fullRect.top() + SearchPopupWidget::kGroupHeaderExtraHeight);
         }
 
-        const QRectF cardRect = fullRect.adjusted(8.0, 2.0, -8.0, -3.0);
+        const QRectF cardRect = fullRect.adjusted(10.0, 2.0, -10.0, -3.0);
         const bool isSelected = (option.state & QStyle::State_Selected) != 0;
         const bool isHovered = (option.state & QStyle::State_MouseOver) != 0;
 
-        // Pure White & Clean Light Pink Result Card
+        // Calm transparent/soft card; selected shows airier pastel tint + sleek 3px pink indicator bar
         if (isSelected) {
             painter->setBrush(theme.brandPinkSelected);
-            painter->setPen(QPen(theme.brandPink, 1.3));
+            painter->setPen(QPen(QColor(236, 22, 128, 70), 1.0));
             painter->drawRoundedRect(cardRect, 10.0, 10.0);
+
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(theme.brandPink);
+            painter->drawRoundedRect(QRectF(cardRect.left() + 1.5, cardRect.top() + 10.0, 3.0, cardRect.height() - 20.0), 1.5, 1.5);
         } else if (isHovered) {
-            painter->setPen(QPen(theme.borderColor, 1.0));
-            painter->setBrush(theme.brandPinkTint);
-            painter->drawRoundedRect(cardRect, 10.0, 10.0);
-        } else {
-            painter->setPen(QPen(theme.borderSubtle, 1.0));
-            painter->setBrush(theme.surfaceBackground);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(theme.hoverSurface);
             painter->drawRoundedRect(cardRect, 10.0, 10.0);
         }
 
@@ -387,28 +392,28 @@ public:
         const int matchedPage = index.data(SearchResultListModel::MatchedPageRole).toInt();
         const bool isPinned = index.data(SearchResultListModel::IsPinnedRole).toBool();
 
-        // 1. Left 32x32 rounded light-pink file icon tile
-        const QRectF iconBox(cardRect.left() + 10.0, cardRect.top() + 10.0, 32.0, 32.0);
+        // 1. Left 32x32 rounded file icon tile
+        const QRectF iconBox(cardRect.left() + 12.0, cardRect.top() + 10.0, 32.0, 32.0);
         BrandingIcon::paintFileTypeIcon(painter, iconBox, ext, false, isSelected);
 
-        const qreal textLeft = iconBox.right() + 10.0;
-        const qreal rightMargin = cardRect.right() - 10.0;
+        const qreal textLeft = iconBox.right() + 11.0;
+        const qreal rightMargin = cardRect.right() - 12.0;
         const qreal availWidth = std::max(80.0, rightMargin - textLeft);
 
-        // 2. Right-side file size
-        const QFont monoSmall = ThemeTokens::makeMonoFont(10, QFont::Normal);
-        const QFontMetrics fmMonoSmall(monoSmall);
+        // 2. Right-side file size in smaller muted gray (#6E6E6E)
+        const QFont sizeFont = ThemeTokens::makeFont(11, QFont::Normal);
+        const QFontMetrics fmSize(sizeFont);
         const QString sizeStr = formatHumanSize(fileSize);
-        const int sizeW = fmMonoSmall.horizontalAdvance(sizeStr) + 6;
-        painter->setFont(monoSmall);
-        painter->setPen(theme.textMuted);
+        const int sizeW = fmSize.horizontalAdvance(sizeStr) + 6;
+        painter->setFont(sizeFont);
+        painter->setPen(theme.textSecondary);
         painter->drawText(QRectF(rightMargin - sizeW, cardRect.top() + 8.0, sizeW, 18.0),
                           Qt::AlignRight | Qt::AlignVCenter,
                           sizeStr);
 
         int rightReserved = sizeW + 8;
 
-        // 3. Optional subtle badge ONLY for Pinned or specific PDF Page (no Filename Match / Cosine!)
+        // 3. Subtle page or pinned tag when applicable
         QString badgeText;
         if (isPinned) {
             badgeText = (matchedPage > 0) ? QStringLiteral("Pinned · p.%1").arg(matchedPage) : QStringLiteral("Pinned");
@@ -418,11 +423,11 @@ public:
 
         const QFont badgeFont = ThemeTokens::makeFont(10, QFont::Medium);
         const QFontMetrics fmBadge(badgeFont);
-        const int badgeW = badgeText.isEmpty() ? 0 : (fmBadge.horizontalAdvance(badgeText) + 14);
+        const int badgeW = badgeText.isEmpty() ? 0 : (fmBadge.horizontalAdvance(badgeText) + 12);
         const int badgeGap = badgeText.isEmpty() ? 0 : 8;
 
-        // 4. Filename on Line 1 (Soft lighter black)
-        const QFont nameFont = ThemeTokens::makeFont(12, QFont::Medium);
+        // 4. Filename on Line 1 — Stronger typographic weight & scale vs muted #6E6E6E metadata
+        const QFont nameFont = ThemeTokens::makeFont(13, QFont::DemiBold);
         const QFontMetrics fmName(nameFont);
         const int maxNameW = std::max(60, static_cast<int>(availWidth - rightReserved - badgeW - badgeGap));
         const QString elidedName = fmName.elidedText(fileName, Qt::ElideMiddle, maxNameW);
@@ -434,8 +439,10 @@ public:
             const int hlX = static_cast<int>(textLeft) + fmName.horizontalAdvance(prefix);
             const int hlW = fmName.horizontalAdvance(fileName.mid(matchStart, matchLen));
             painter->setPen(Qt::NoPen);
-            painter->setBrush(theme.brandPinkStrongFill);
-            painter->drawRoundedRect(QRectF(hlX - 1.0, cardRect.top() + 9.0, hlW + 2.0, 16.0), 3.0, 3.0);
+            painter->setBrush(QColor(236, 22, 128, 20));
+            painter->drawRoundedRect(QRectF(hlX - 1.0, cardRect.top() + 8.0, hlW + 2.0, 18.0), 3.0, 3.0);
+            painter->setPen(QPen(QColor(236, 22, 128, 165), 1.4));
+            painter->drawLine(QPointF(hlX, cardRect.top() + 25.0), QPointF(hlX + hlW, cardRect.top() + 25.0));
         }
 
         painter->setFont(nameFont);
@@ -447,16 +454,16 @@ public:
         if (!badgeText.isEmpty()) {
             const qreal badgeLeft = std::min(textLeft + actualNameW + 8.0, rightMargin - rightReserved - badgeW);
             const QRectF badgeRect(badgeLeft, cardRect.top() + 9.0, badgeW, 17.0);
-            painter->setPen(QPen(theme.borderColor, 1.0));
-            painter->setBrush(theme.brandPinkStrongFill);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(theme.brandPinkTint);
             painter->drawRoundedRect(badgeRect, 5.0, 5.0);
             painter->setFont(badgeFont);
-            painter->setPen(theme.textPrimary);
+            painter->setPen(QColor(180, 28, 102));
             painter->drawText(badgeRect, Qt::AlignCenter, badgeText);
         }
 
-        // 5. Line 2: Monospaced Windows path
-        const QFont pathFont = ThemeTokens::makeMonoFont(10, QFont::Normal);
+        // 5. Line 2: Clean muted #6E6E6E path
+        const QFont pathFont = ThemeTokens::makeFont(11, QFont::Normal);
         const QFontMetrics fmPath(pathFont);
         const QString nativePath = QDir::toNativeSeparators(fullPath);
         const QString elidedPath = fmPath.elidedText(nativePath, Qt::ElideMiddle, static_cast<int>(availWidth));
@@ -485,6 +492,7 @@ private:
 SearchPopupWidget::SearchPopupWidget(QWidget* parent)
     : QWidget(parent) {
     setAttribute(Qt::WA_OpaquePaintEvent, false);
+    setMouseTracking(true);
     setFocusPolicy(Qt::NoFocus);
 
     m_model = new SearchResultListModel(this);
@@ -505,9 +513,9 @@ SearchPopupWidget::SearchPopupWidget(QWidget* parent)
     m_listView->viewport()->setAutoFillBackground(false);
     m_listView->setStyleSheet(QStringLiteral(
         "QListView { background: transparent; border: none; outline: none; }"
-        "QScrollBar:vertical { width: 5px; background: #FDF2F8; margin: 4px 2px; border-radius: 2px; }"
-        "QScrollBar::handle:vertical { background: #F472B6; border-radius: 2px; min-height: 24px; }"
-        "QScrollBar::handle:vertical:hover { background: #EC1680; }"
+        "QScrollBar:vertical { width: 5px; background: transparent; margin: 6px 2px; border-radius: 2px; }"
+        "QScrollBar::handle:vertical { background: rgba(0, 0, 0, 38); border-radius: 2px; min-height: 24px; }"
+        "QScrollBar::handle:vertical:hover { background: rgba(236, 22, 128, 140); }"
         "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"));
     m_listView->hide();
 
@@ -703,8 +711,8 @@ QString SearchPopupWidget::statusHeadline() const {
 }
 
 int SearchPopupWidget::leftPaneWidth() const noexcept {
-    // 54% left results pane / 46% right summary & details pane
-    return std::max(260, (width() * 54) / 100);
+    // 52% left results pane / 48% spacious right summary & preview pane
+    return std::max(260, (width() * 52) / 100);
 }
 
 void SearchPopupWidget::resizeEvent(QResizeEvent* event) {
@@ -715,22 +723,22 @@ void SearchPopupWidget::resizeEvent(QResizeEvent* event) {
 void SearchPopupWidget::updateListLayout() {
     if (m_listView != nullptr && m_listView->isVisible()) {
         const int leftW = leftPaneWidth();
-        const int listH = std::max(0, height() - kHeaderHeight - 8);
+        const int listH = std::max(0, height() - kHeaderHeight - 10);
         m_listView->setGeometry(2, kHeaderHeight + 4, leftW - 4, listH);
     }
 }
 
 QRectF SearchPopupWidget::modePillRect(int modeIndex) const {
-    static const int widths[4] = {80, 72, 86, 92};
+    static const int widths[4] = {74, 68, 84, 90};
     qreal x = 18.0;
     for (int i = 0; i < modeIndex && i < 4; ++i) {
-        x += widths[i] + 6.0;
+        x += widths[i] + 4.0;
     }
     return QRectF(x, 9.0, widths[modeIndex], 26.0);
 }
 
 QRectF SearchPopupWidget::backButtonRect() const {
-    return QRectF(width() - 96.0, 9.0, 80.0, 26.0);
+    return QRectF(width() - 98.0, 9.0, 80.0, 26.0);
 }
 
 QRectF SearchPopupWidget::inspectorPaneRect() const {
@@ -739,29 +747,117 @@ QRectF SearchPopupWidget::inspectorPaneRect() const {
     return QRectF(leftW, kHeaderHeight, width() - leftW - 1.0, bodyH);
 }
 
+QRectF SearchPopupWidget::inspectorPathBoxRect(const QRectF& inspRect) const {
+    const qreal pad = 22.0;
+    const qreal hdrBottom = inspRect.top() + 78.0;
+    return QRectF(inspRect.left() + pad, hdrBottom + 28.0, inspRect.width() - pad * 2.0, 34.0);
+}
+
 QRectF SearchPopupWidget::inspectorCopyPathButtonRect(const QRectF& inspRect) const {
-    return QRectF(inspRect.right() - 14.0 - 44.0, inspRect.top() + 98.0, 40.0, 22.0);
-}
-
-QRectF SearchPopupWidget::inspectorOpenButtonRect(const QRectF& inspRect) const {
-    const qreal barTop = inspRect.bottom() - 42.0;
-    return QRectF(inspRect.left() + 14.0, barTop, 84.0, 28.0);
-}
-
-QRectF SearchPopupWidget::inspectorRevealButtonRect(const QRectF& inspRect) const {
-    const qreal barTop = inspRect.bottom() - 42.0;
-    return QRectF(inspRect.left() + 106.0, barTop, 84.0, 28.0);
-}
-
-QRectF SearchPopupWidget::inspectorRelatedButtonRect(const QRectF& inspRect) const {
-    const qreal barTop = inspRect.bottom() - 42.0;
-    return QRectF(inspRect.left() + 198.0, barTop, 84.0, 28.0);
+    const QRectF pb = inspectorPathBoxRect(inspRect);
+    return QRectF(pb.right() - 29.0, pb.top() + 5.0, 24.0, 24.0);
 }
 
 QRectF SearchPopupWidget::inspectorPinButtonRect(const QRectF& inspRect) const {
-    const qreal barTop = inspRect.bottom() - 42.0;
-    const qreal leftX = inspRect.left() + 290.0;
-    return QRectF(leftX, barTop, std::max(60.0, inspRect.right() - 14.0 - leftX), 28.0);
+    const qreal barTop = inspRect.bottom() - 48.0;
+    const qreal rightEdge = inspRect.right() - 22.0;
+    return QRectF(rightEdge - 32.0, barTop, 32.0, 32.0);
+}
+
+QRectF SearchPopupWidget::inspectorRelatedButtonRect(const QRectF& inspRect) const {
+    const qreal barTop = inspRect.bottom() - 48.0;
+    const qreal rightEdge = inspRect.right() - 22.0;
+    return QRectF(rightEdge - 72.0, barTop, 32.0, 32.0);
+}
+
+QRectF SearchPopupWidget::inspectorRevealButtonRect(const QRectF& inspRect) const {
+    const qreal barTop = inspRect.bottom() - 48.0;
+    const qreal rightEdge = inspRect.right() - 22.0;
+    return QRectF(rightEdge - 112.0, barTop, 32.0, 32.0);
+}
+
+QRectF SearchPopupWidget::inspectorOpenButtonRect(const QRectF& inspRect) const {
+    const qreal barTop = inspRect.bottom() - 48.0;
+    const qreal rightEdge = inspRect.right() - 22.0;
+    return QRectF(rightEdge - 152.0, barTop, 32.0, 32.0);
+}
+
+int SearchPopupWidget::hoveredActionIndex(const QPointF& pos) const {
+    if (resultCount() <= 0) {
+        return -1;
+    }
+    const QRectF inspRect = inspectorPaneRect();
+    if (!inspRect.contains(pos)) {
+        return -1;
+    }
+    if (inspectorOpenButtonRect(inspRect).contains(pos)) return 0;
+    if (inspectorRevealButtonRect(inspRect).contains(pos)) return 1;
+    if (inspectorRelatedButtonRect(inspRect).contains(pos)) return 2;
+    if (inspectorPinButtonRect(inspRect).contains(pos)) return 3;
+    return -1;
+}
+
+void SearchPopupWidget::mouseMoveEvent(QMouseEvent* event) {
+    const QPointF pos = event->position();
+    bool needUpdate = false;
+
+    int newModeHover = -1;
+    if (pos.y() <= kHeaderHeight && m_relatedSourceFileName.isEmpty()) {
+        for (int i = 0; i < 4; ++i) {
+            if (modePillRect(i).contains(pos)) {
+                newModeHover = i;
+                break;
+            }
+        }
+    }
+    if (newModeHover != m_hoveredModeIdx) {
+        m_hoveredModeIdx = newModeHover;
+        needUpdate = true;
+    }
+
+    bool newPathHover = false;
+    int newActionHover = -1;
+    if (resultCount() > 0) {
+        const QRectF inspRect = inspectorPaneRect();
+        newPathHover = inspectorPathBoxRect(inspRect).contains(pos);
+        newActionHover = hoveredActionIndex(pos);
+    }
+
+    if (newPathHover != m_pathHovered || newActionHover != m_hoveredActionIdx) {
+        m_pathHovered = newPathHover;
+        m_hoveredActionIdx = newActionHover;
+        needUpdate = true;
+
+        if (m_hoveredActionIdx >= 0) {
+            static const QString kTips[4] = {
+                QStringLiteral("Open file (Enter)"),
+                QStringLiteral("Reveal in File Explorer (Ctrl+Enter)"),
+                QStringLiteral("Find related documents (Ctrl+R)"),
+                QStringLiteral("Pin / Unpin favorite (Ctrl+D)")
+            };
+            QToolTip::showText(event->globalPosition().toPoint(), kTips[m_hoveredActionIdx], this);
+        } else if (m_pathHovered) {
+            QToolTip::showText(event->globalPosition().toPoint(), QStringLiteral("Copy path (Ctrl+Shift+C)"), this);
+        } else {
+            QToolTip::hideText();
+        }
+    }
+
+    if (needUpdate) {
+        update();
+    }
+    QWidget::mouseMoveEvent(event);
+}
+
+void SearchPopupWidget::leaveEvent(QEvent* event) {
+    if (m_pathHovered || m_hoveredActionIdx != -1 || m_hoveredModeIdx != -1) {
+        m_pathHovered = false;
+        m_hoveredActionIdx = -1;
+        m_hoveredModeIdx = -1;
+        QToolTip::hideText();
+        update();
+    }
+    QWidget::leaveEvent(event);
 }
 
 void SearchPopupWidget::mousePressEvent(QMouseEvent* event) {
@@ -788,8 +884,15 @@ void SearchPopupWidget::mousePressEvent(QMouseEvent* event) {
             const QRectF inspRect = inspectorPaneRect();
             if (inspRect.contains(pos)) {
                 if (const auto* sel = selectedResult()) {
-                    if (inspectorCopyPathButtonRect(inspRect).contains(pos)) {
+                    if (inspectorCopyPathButtonRect(inspRect).contains(pos) ||
+                        inspectorPathBoxRect(inspRect).contains(pos)) {
                         emit copyPathRequested(*sel);
+                        m_copiedFeedback = true;
+                        update();
+                        QTimer::singleShot(1400, this, [this]() {
+                            m_copiedFeedback = false;
+                            update();
+                        });
                         event->accept();
                         return;
                     }
@@ -875,11 +978,11 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
     painter.setRenderHint(QPainter::TextAntialiasing, true);
 
     const auto theme = ThemeTokens::get(false);
-    const QRectF bounds = QRectF(rect()).adjusted(2.0, 0.0, -2.0, -2.0);
+    const QRectF bounds = QRectF(rect()).adjusted(1.0, 0.0, -1.0, -1.0);
 
-    // Clip interior fills so parent's 16px rounded pink border remains crisp along the bottom corners
+    // Clip cleanly inside DesktopSearchBar's 16px rounded frosted card
     QPainterPath clipPath;
-    const qreal r = 14.0;
+    const qreal r = 15.0;
     clipPath.moveTo(bounds.left(), bounds.top());
     clipPath.lineTo(bounds.right(), bounds.top());
     clipPath.lineTo(bounds.right(), bounds.bottom() - r);
@@ -890,15 +993,10 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
     painter.setClipPath(clipPath);
 
     // -------------------------------------------------------------------------
-    // 1. Clean Filter Bar Header (Pure White & Light Pink)
+    // 1. Filter Bar Header (Neutral Track + Dynamic Pink Focus Accents)
     // -------------------------------------------------------------------------
-    const QRectF filterHeaderRect(bounds.left(), 0.0, bounds.width(), kHeaderHeight);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(theme.surfaceBackground);
-    painter.drawRect(filterHeaderRect);
-
     if (!m_relatedSourceFileName.isEmpty()) {
-        painter.setFont(ThemeTokens::makeFont(12, QFont::DemiBold));
+        painter.setFont(ThemeTokens::makeFont(12, QFont::Medium));
         painter.setPen(theme.textPrimary);
         const QFontMetrics fm(painter.font());
         const QString banner = fm.elidedText(
@@ -908,16 +1006,16 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
         painter.drawText(QRectF(18.0, 8.0, width() - 125.0, 28.0), Qt::AlignLeft | Qt::AlignVCenter, banner);
 
         const QRectF backRect = backButtonRect();
-        painter.setPen(QPen(theme.brandPink, 1.0));
-        painter.setBrush(theme.brandPinkSelected);
+        painter.setPen(QPen(theme.borderColor, 1.0));
+        painter.setBrush(theme.elevatedBackground);
         painter.drawRoundedRect(backRect, 6.0, 6.0);
-        painter.setFont(ThemeTokens::makeFont(11, QFont::DemiBold));
+        painter.setFont(ThemeTokens::makeFont(11, QFont::Medium));
         painter.setPen(theme.textPrimary);
         painter.drawText(backRect, Qt::AlignCenter, QStringLiteral("← Back"));
     } else {
-        const QRectF trackRect(14.0, 5.0, 356.0, 34.0);
+        const QRectF trackRect(14.0, 5.0, 336.0, 34.0);
         painter.setPen(QPen(theme.borderSubtle, 1.0));
-        painter.setBrush(theme.brandPinkTint);
+        painter.setBrush(theme.elevatedBackground);
         painter.drawRoundedRect(trackRect, 9.0, 9.0);
 
         static const QString kModeLabels[4] = {
@@ -930,20 +1028,25 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
         for (int i = 0; i < 4; ++i) {
             const QRectF pRect = modePillRect(i);
             const bool active = (static_cast<int>(m_searchMode) == i);
+            const bool hovered = (m_hoveredModeIdx == i);
             if (active) {
-                painter.setPen(QPen(theme.brandPink, 1.0));
-                painter.setBrush(theme.brandPinkStrongFill);
+                painter.setPen(QPen(QColor(236, 22, 128, 130), 1.0));
+                painter.setBrush(QColor(255, 255, 255, 245));
                 painter.drawRoundedRect(pRect, 6.0, 6.0);
                 painter.setFont(ThemeTokens::makeFont(11, QFont::Medium));
                 painter.setPen(theme.textPrimary);
             } else {
+                if (hovered) {
+                    painter.setPen(Qt::NoPen);
+                    painter.setBrush(QColor(236, 22, 128, 16));
+                    painter.drawRoundedRect(pRect, 6.0, 6.0);
+                }
                 painter.setFont(ThemeTokens::makeFont(11, QFont::Normal));
                 painter.setPen(theme.textSecondary);
             }
             painter.drawText(pRect, Qt::AlignCenter, kModeLabels[i]);
         }
 
-        // Right-side simple result count
         if (!m_queryText.isEmpty()) {
             const QFont countFont = ThemeTokens::makeFont(11, QFont::Normal);
             painter.setFont(countFont);
@@ -951,18 +1054,18 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
                                          ? QStringLiteral("1 result")
                                          : QStringLiteral("%1 results").arg(resultCount());
             painter.setPen(theme.textSecondary);
-            painter.drawText(QRectF(bounds.right() - 150.0, 0.0, 134.0, kHeaderHeight),
+            painter.drawText(QRectF(bounds.right() - 150.0, 0.0, 132.0, kHeaderHeight),
                              Qt::AlignRight | Qt::AlignVCenter,
                              countStr);
         }
     }
 
-    // Header bottom hairline divider
+    // Neutral #EFEFEF divider
     painter.setPen(QPen(theme.borderSubtle, 1.0));
     painter.drawLine(QPointF(bounds.left(), kHeaderHeight), QPointF(bounds.right(), kHeaderHeight));
 
     // -------------------------------------------------------------------------
-    // 2. Empty State (when typed query has 0 matches)
+    // 2. Empty State
     // -------------------------------------------------------------------------
     if (resultCount() == 0) {
         const QRectF bodyRect(bounds.left(), kHeaderHeight, bounds.width(), bounds.bottom() - kHeaderHeight);
@@ -971,7 +1074,7 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
         const QFont titleFont = ThemeTokens::makeFont(13, QFont::Medium);
         painter.setFont(titleFont);
         painter.setPen(theme.textPrimary);
-        painter.drawText(QRectF(bounds.left() + 24.0, center.y() - 22.0, bounds.width() - 48.0, 22.0),
+        painter.drawText(QRectF(bounds.left() + 24.0, center.y() - 20.0, bounds.width() - 48.0, 22.0),
                          Qt::AlignCenter,
                          statusHeadline());
 
@@ -982,91 +1085,96 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
                                      ? (m_indexingInProgress
                                             ? QStringLiteral("Scanning your folders in the background...")
                                             : QStringLiteral("Index is initializing."))
-                                     : QStringLiteral("Try different keywords or another filter mode.");
-        painter.drawText(QRectF(bounds.left() + 24.0, center.y() + 2.0, bounds.width() - 48.0, 20.0),
+                                     : QStringLiteral("Try different keywords or switch filter mode.");
+        painter.drawText(QRectF(bounds.left() + 24.0, center.y() + 4.0, bounds.width() - 48.0, 20.0),
                          Qt::AlignCenter,
                          subtitle);
     } else {
         // ---------------------------------------------------------------------
-        // 3. Dual-Column Split: Left Results | Right Summary & File Details
+        // 3. Dual-Column Split: Left Results | Spacious Right Preview Panel
         // ---------------------------------------------------------------------
         const QRectF inspRect = inspectorPaneRect();
 
-        // Pure White right pane & crisp light-pink vertical divider
         painter.setPen(Qt::NoPen);
         painter.setBrush(theme.inspectorBackground);
         painter.drawRect(inspRect);
 
+        // Clean neutral #EFEFEF vertical divider
         painter.setPen(QPen(theme.borderSubtle, 1.0));
         painter.drawLine(QPointF(inspRect.left(), inspRect.top()), QPointF(inspRect.left(), inspRect.bottom()));
 
         if (const auto* sel = selectedResult()) {
-            const qreal pad = 14.0;
+            const qreal pad = 22.0;
             const qreal contentLeft = inspRect.left() + pad;
             const qreal contentWidth = inspRect.width() - pad * 2.0;
             const QString extLower = sel->extension.toLower();
 
-            // A. Clean File Header
-            const QRectF hdrIconRect(contentLeft, inspRect.top() + 14.0, 42.0, 42.0);
+            // A. Typographic Hierarchy: Larger Bold Filename + Muted File Type Subtitle
+            const QRectF hdrIconRect(contentLeft, inspRect.top() + 18.0, 44.0, 44.0);
             BrandingIcon::paintFileTypeIcon(&painter, hdrIconRect, extLower, false, true);
 
-            const qreal titleLeft = hdrIconRect.right() + 12.0;
+            const qreal titleLeft = hdrIconRect.right() + 14.0;
             const qreal titleAvailW = inspRect.right() - pad - titleLeft;
 
-            const QFont titleFont = ThemeTokens::makeFont(14, QFont::Medium);
+            const QFont titleFont = ThemeTokens::makeFont(15, QFont::DemiBold);
             painter.setFont(titleFont);
             painter.setPen(theme.textPrimary);
             const QFontMetrics fmTitle(titleFont);
-            painter.drawText(QRectF(titleLeft, inspRect.top() + 15.0, titleAvailW, 20.0),
+            painter.drawText(QRectF(titleLeft, inspRect.top() + 19.0, titleAvailW, 22.0),
                              Qt::AlignLeft | Qt::AlignVCenter,
                              fmTitle.elidedText(sel->name, Qt::ElideMiddle, static_cast<int>(titleAvailW)));
 
             const QFont typeFont = ThemeTokens::makeFont(11, QFont::Normal);
             painter.setFont(typeFont);
             painter.setPen(theme.textSecondary);
-            painter.drawText(QRectF(titleLeft, inspRect.top() + 36.0, titleAvailW, 18.0),
+            painter.drawText(QRectF(titleLeft, inspRect.top() + 42.0, titleAvailW, 18.0),
                              Qt::AlignLeft | Qt::AlignVCenter,
                              humanReadableFileType(extLower));
 
-            // Header divider
-            const qreal hdrBottom = inspRect.top() + 68.0;
+            const qreal hdrBottom = inspRect.top() + 78.0;
             painter.setPen(QPen(theme.borderSubtle, 1.0));
             painter.drawLine(QPointF(contentLeft, hdrBottom), QPointF(inspRect.right() - pad, hdrBottom));
 
-            // B. Path:
-            painter.setFont(ThemeTokens::makeFont(11, QFont::Medium));
-            painter.setPen(theme.textPrimary);
-            painter.drawText(QRectF(contentLeft, hdrBottom + 8.0, contentWidth, 16.0),
+            // B. Unified Path Box (Hover-Only Clipboard Icon, NO boxed "Copy" pill!)
+            painter.setFont(ThemeTokens::makeFont(11, QFont::Normal));
+            painter.setPen(theme.textSecondary);
+            painter.drawText(QRectF(contentLeft, hdrBottom + 12.0, contentWidth, 14.0),
                              Qt::AlignLeft | Qt::AlignVCenter,
                              QStringLiteral("Path:"));
 
-            const QRectF pathBoxRect(contentLeft, hdrBottom + 26.0, contentWidth, 30.0);
-            painter.setPen(QPen(theme.borderColor, 1.0));
+            const QRectF pathBoxRect = inspectorPathBoxRect(inspRect);
+            const bool showCopyIcon = m_pathHovered || m_copiedFeedback;
+            painter.setPen(QPen(showCopyIcon ? QColor(236, 22, 128, 125) : theme.borderSubtle, 1.0));
             painter.setBrush(theme.codeBoxBackground);
             painter.drawRoundedRect(pathBoxRect, 8.0, 8.0);
 
-            const QRectF copyBtnRect = inspectorCopyPathButtonRect(inspRect);
-            painter.setPen(QPen(theme.brandPink, 1.0));
-            painter.setBrush(theme.brandPinkStrongFill);
-            painter.drawRoundedRect(copyBtnRect, 5.0, 5.0);
-            painter.setFont(ThemeTokens::makeFont(10, QFont::Medium));
-            painter.setPen(theme.textPrimary);
-            painter.drawText(copyBtnRect, Qt::AlignCenter, QStringLiteral("Copy"));
-
-            const QFont pathFont = ThemeTokens::makeMonoFont(10, QFont::Normal);
+            const int pathRightReserve = showCopyIcon ? 38 : 14;
+            const QFont pathFont = ThemeTokens::makeFont(11, QFont::Normal);
             painter.setFont(pathFont);
-            painter.setPen(theme.textPrimary);
+            painter.setPen(theme.textSecondary);
             const QFontMetrics fmPath(pathFont);
-            const int pathMaxW = std::max(60, static_cast<int>(pathBoxRect.width() - 56.0));
+            const int pathMaxW = std::max(60, static_cast<int>(pathBoxRect.width() - pathRightReserve - 12.0));
             const QString nativePath = QDir::toNativeSeparators(sel->path);
-            painter.drawText(QRectF(pathBoxRect.left() + 10.0, pathBoxRect.top(), pathMaxW, pathBoxRect.height()),
+            painter.drawText(QRectF(pathBoxRect.left() + 12.0, pathBoxRect.top(), pathMaxW, pathBoxRect.height()),
                              Qt::AlignLeft | Qt::AlignVCenter,
                              fmPath.elidedText(nativePath, Qt::ElideMiddle, pathMaxW));
 
-            // C. Clean 2-Card Metadata Row (Size & Modified)
-            const qreal gridTop = pathBoxRect.bottom() + 10.0;
-            const qreal cellW = (contentWidth - 10.0) * 0.5;
-            const qreal cellH = 42.0;
+            if (showCopyIcon) {
+                const QRectF copyBtnRect = inspectorCopyPathButtonRect(inspRect);
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(QColor(236, 22, 128, 22));
+                painter.drawRoundedRect(copyBtnRect, 5.0, 5.0);
+                BrandingIcon::paintClipboardIcon(
+                    &painter,
+                    copyBtnRect.adjusted(4.0, 4.0, -4.0, -4.0),
+                    theme.brandPink,
+                    m_copiedFeedback);
+            }
+
+            // C. Spacious Metadata Cards (Size & Modified in muted contrast hierarchy)
+            const qreal gridTop = pathBoxRect.bottom() + 12.0;
+            const qreal cellW = (contentWidth - 12.0) * 0.5;
+            const qreal cellH = 46.0;
 
             auto drawMetaCard = [&](const QRectF& cell, const QString& label, const QString& value) {
                 painter.setPen(QPen(theme.borderSubtle, 1.0));
@@ -1075,53 +1183,53 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
 
                 painter.setFont(ThemeTokens::makeFont(10, QFont::Normal));
                 painter.setPen(theme.textMuted);
-                painter.drawText(QRectF(cell.left() + 10.0, cell.top() + 4.0, cell.width() - 20.0, 14.0),
+                painter.drawText(QRectF(cell.left() + 12.0, cell.top() + 6.0, cell.width() - 24.0, 14.0),
                                  Qt::AlignLeft | Qt::AlignVCenter,
                                  label);
 
-                const QFont valFont = ThemeTokens::makeFont(11, QFont::Medium);
+                const QFont valFont = ThemeTokens::makeFont(12, QFont::Medium);
                 painter.setFont(valFont);
-                painter.setPen(theme.textPrimary);
+                painter.setPen(theme.textSecondary);
                 const QFontMetrics fmVal(valFont);
-                painter.drawText(QRectF(cell.left() + 10.0, cell.top() + 20.0, cell.width() - 20.0, 17.0),
+                painter.drawText(QRectF(cell.left() + 12.0, cell.top() + 22.0, cell.width() - 24.0, 18.0),
                                  Qt::AlignLeft | Qt::AlignVCenter,
-                                 fmVal.elidedText(value, Qt::ElideMiddle, static_cast<int>(cell.width() - 20.0)));
+                                 fmVal.elidedText(value, Qt::ElideMiddle, static_cast<int>(cell.width() - 24.0)));
             };
 
             drawMetaCard(QRectF(contentLeft, gridTop, cellW, cellH),
                          QStringLiteral("Size"),
                          formatHumanSize(sel->size));
 
-            drawMetaCard(QRectF(contentLeft + cellW + 10.0, gridTop, cellW, cellH),
+            drawMetaCard(QRectF(contentLeft + cellW + 12.0, gridTop, cellW, cellH),
                          QStringLiteral("Modified"),
                          formatTimestamp(sel->mtime));
 
-            // D. Single Clean "Summary:" Box
-            const qreal summaryHeaderTop = gridTop + cellH + 14.0;
-            painter.setFont(ThemeTokens::makeFont(11, QFont::Medium));
-            painter.setPen(theme.textPrimary);
+            // D. Generously Padded "Summary:" Box
+            const qreal summaryHeaderTop = gridTop + cellH + 16.0;
+            painter.setFont(ThemeTokens::makeFont(11, QFont::Normal));
+            painter.setPen(theme.textSecondary);
             painter.drawText(QRectF(contentLeft, summaryHeaderTop, contentWidth * 0.65, 16.0),
                              Qt::AlignLeft | Qt::AlignVCenter,
                              QStringLiteral("Summary:"));
 
             if (sel->matchedPage > 0) {
                 painter.setFont(ThemeTokens::makeFont(10, QFont::Normal));
-                painter.setPen(theme.textSecondary);
+                painter.setPen(theme.textMuted);
                 painter.drawText(QRectF(contentLeft, summaryHeaderTop, contentWidth, 16.0),
                                  Qt::AlignRight | Qt::AlignVCenter,
                                  QStringLiteral("Page %1").arg(sel->matchedPage));
             }
 
-            const qreal actionBarTop = inspRect.bottom() - 52.0;
+            const qreal iconRowTop = inspRect.bottom() - 48.0;
             const qreal summaryBoxTop = summaryHeaderTop + 20.0;
-            const qreal summaryBoxH = std::max(84.0, actionBarTop - summaryBoxTop - 10.0);
+            const qreal summaryBoxH = std::max(84.0, iconRowTop - summaryBoxTop - 14.0);
             const QRectF summaryBoxRect(contentLeft, summaryBoxTop, contentWidth, summaryBoxH);
 
-            painter.setPen(QPen(theme.borderColor, 1.0));
+            painter.setPen(QPen(theme.borderSubtle, 1.0));
             painter.setBrush(theme.codeBoxBackground);
-            painter.drawRoundedRect(summaryBoxRect, 8.0, 8.0);
+            painter.drawRoundedRect(summaryBoxRect, 10.0, 10.0);
 
-            const QRectF passageRect = summaryBoxRect.adjusted(12.0, 10.0, -12.0, -10.0);
+            const QRectF passageRect = summaryBoxRect.adjusted(14.0, 12.0, -14.0, -12.0);
             QString bodyText = !m_previewText.isEmpty() ? m_previewText : sel->snippet;
             if (bodyText.isEmpty()) {
                 bodyText = QStringLiteral("No text summary available for this file.");
@@ -1137,28 +1245,46 @@ void SearchPopupWidget::paintEvent(QPaintEvent* /*event*/) {
                              Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
                              bodyText.trimmed());
 
-            // E. Clean Light-Pink Action Buttons Written in Soft Black
-            painter.setPen(QPen(theme.borderSubtle, 1.0));
-            painter.drawLine(QPointF(inspRect.left(), actionBarTop), QPointF(inspRect.right(), actionBarTop));
-
+            // E. Streamlined Icon-Only Bottom-Right Action Control Group
             const QRectF openBtn = inspectorOpenButtonRect(inspRect);
             const QRectF revealBtn = inspectorRevealButtonRect(inspRect);
             const QRectF relatedBtn = inspectorRelatedButtonRect(inspRect);
             const QRectF pinBtn = inspectorPinButtonRect(inspRect);
 
-            auto drawActionBtn = [&](const QRectF& r, const QString& label, bool primaryStyle) {
-                painter.setPen(QPen(primaryStyle ? theme.brandPink : theme.borderColor, 1.0));
-                painter.setBrush(primaryStyle ? theme.brandPinkStrongFill : theme.brandPinkTint);
-                painter.drawRoundedRect(r, 7.0, 7.0);
-                painter.setFont(ThemeTokens::makeFont(11, primaryStyle ? QFont::Medium : QFont::Normal));
-                painter.setPen(theme.textPrimary);
-                painter.drawText(r, Qt::AlignCenter, label);
+            auto drawIconBtnBg = [&](const QRectF& r, int idx, bool isPrimaryOrActive) {
+                const bool hov = (m_hoveredActionIdx == idx);
+                const QColor bg = (hov || isPrimaryOrActive)
+                                      ? QColor(236, 22, 128, hov ? 32 : 18)
+                                      : theme.elevatedBackground;
+                const QColor brd = hov
+                                       ? QColor(236, 22, 128, 145)
+                                       : (isPrimaryOrActive ? QColor(236, 22, 128, 80) : theme.borderSubtle);
+                painter.setPen(QPen(brd, 1.0));
+                painter.setBrush(bg);
+                painter.drawRoundedRect(r, 8.0, 8.0);
             };
 
-            drawActionBtn(openBtn, QStringLiteral("Open"), true);
-            drawActionBtn(revealBtn, QStringLiteral("Reveal"), false);
-            drawActionBtn(relatedBtn, QStringLiteral("Related"), false);
-            drawActionBtn(pinBtn, sel->isPinned ? QStringLiteral("Pinned") : QStringLiteral("Pin"), sel->isPinned);
+            drawIconBtnBg(openBtn, 0, true);
+            BrandingIcon::paintExternalOpenIcon(&painter, openBtn.adjusted(7.0, 7.0, -7.0, -7.0), theme.brandPink);
+
+            drawIconBtnBg(revealBtn, 1, false);
+            BrandingIcon::paintFolderIcon(
+                &painter,
+                revealBtn.adjusted(7.0, 7.0, -7.0, -7.0),
+                m_hoveredActionIdx == 1 ? theme.brandPink : theme.iconPrimary);
+
+            drawIconBtnBg(relatedBtn, 2, false);
+            BrandingIcon::paintRelatedIcon(
+                &painter,
+                relatedBtn.adjusted(7.0, 7.0, -7.0, -7.0),
+                m_hoveredActionIdx == 2 ? theme.brandPink : theme.iconPrimary);
+
+            drawIconBtnBg(pinBtn, 3, sel->isPinned);
+            BrandingIcon::paintPinIcon(
+                &painter,
+                pinBtn.adjusted(7.0, 7.0, -7.0, -7.0),
+                (sel->isPinned || m_hoveredActionIdx == 3) ? theme.brandPink : theme.iconPrimary,
+                sel->isPinned);
         }
     }
 }

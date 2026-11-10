@@ -120,6 +120,8 @@ protected:
     void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void leaveEvent(QEvent* event) override;
 
 private:
     void updateListLayout();
@@ -128,11 +130,13 @@ private:
     QRectF modePillRect(int modeIndex) const;
     QRectF backButtonRect() const;
     QRectF inspectorPaneRect() const;
+    QRectF inspectorPathBoxRect(const QRectF& inspRect) const;
     QRectF inspectorCopyPathButtonRect(const QRectF& inspRect) const;
     QRectF inspectorOpenButtonRect(const QRectF& inspRect) const;
     QRectF inspectorRevealButtonRect(const QRectF& inspRect) const;
     QRectF inspectorRelatedButtonRect(const QRectF& inspRect) const;
     QRectF inspectorPinButtonRect(const QRectF& inspRect) const;
+    int hoveredActionIndex(const QPointF& pos) const;
 
     QString m_queryText;
     QString m_previewText;
@@ -142,6 +146,10 @@ private:
     bool m_previewVisible = false;
     bool m_darkTheme = false;
     bool m_indexingInProgress = false;
+    bool m_pathHovered = false;
+    bool m_copiedFeedback = false;
+    int m_hoveredActionIdx = -1;
+    int m_hoveredModeIdx = -1;
 
     SearchResultListModel* m_model = nullptr;
     QListView* m_listView = nullptr;

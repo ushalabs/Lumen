@@ -5,57 +5,57 @@
 namespace lumen::ui {
 
 ThemeTokens ThemeTokens::get(bool /*dark*/) {
-    // Single Pure White + Clean Light Pink + Crisp Black Text Theme
+    // Elevated Frosted White + Soft Pink Active-Focus & Neutral #EFEFEF Structural Palette
     return ThemeTokens{
-        /* brandPink           */ QColor(236, 22, 128),     // #EC1680 (UshaLabs Downshift/Lumen Pink)
-        /* brandPinkHover      */ QColor(244, 114, 182),    // #F472B6 (Clean medium-light pink hover)
-        /* brandPinkLight      */ QColor(44, 44, 50),       // #2C2C32 (Softened black text for light pink elements)
-        /* brandPinkTint       */ QColor(253, 242, 248),    // #FDF2F8 (Soft blush light pink fill)
-        /* brandPinkSelected   */ QColor(252, 231, 243),    // #FCE7F3 (Clean light pink selected card/pill)
-        /* brandPinkStrongFill */ QColor(251, 207, 232),    // #FBCFE8 (Richer light pink for primary buttons/highlights)
-        /* brandPinkBorder     */ QColor(236, 22, 128, 150), // Clean pink focus/selection border
+        /* brandPink           */ QColor(236, 22, 128),       // #EC1680 (UshaLabs Downshift/Lumen Pink accent)
+        /* brandPinkHover      */ QColor(244, 114, 182),      // #F472B6 (Soft pink hover ring)
+        /* brandPinkLight      */ QColor(28, 28, 33),         // #1C1C21 (Primary dark ink on pastel elements)
+        /* brandPinkTint       */ QColor(236, 22, 128, 18),   // Whisper-light translucent pastel pink (7% alpha)
+        /* brandPinkSelected   */ QColor(253, 242, 248, 225), // #FDF2F8 (Soft airy selected card tint)
+        /* brandPinkStrongFill */ QColor(236, 22, 128, 30),   // Soft pastel match wash (~12% alpha)
+        /* brandPinkBorder     */ QColor(236, 22, 128, 155),  // Active focus & selected border accent
 
-        /* textPrimary         */ QColor(44, 44, 50),       // #2C2C32 (Soft lighter black - not harsh/heavy)
-        /* textSecondary       */ QColor(92, 92, 102),      // #5C5C66 (Medium-dark slate)
-        /* textMuted           */ QColor(126, 126, 136),    // #7E7E88 (Soft muted gray)
+        /* textPrimary         */ QColor(28, 28, 33),         // #1C1C21 (Crisp dark primary for filename headers & body)
+        /* textSecondary       */ QColor(110, 110, 110),      // #6E6E6E (Muted gray for paths, file types, sizes, times)
+        /* textMuted           */ QColor(142, 142, 150),      // #8E8E96 (Soft metadata captions & group headers)
 
-        /* surfaceBackground   */ QColor(255, 255, 255),    // #FFFFFF (Pure White surface)
-        /* elevatedBackground  */ QColor(253, 242, 248),    // #FDF2F8 (Light pink elevated element)
-        /* windowBackground    */ QColor(255, 255, 255),    // #FFFFFF (Pure White window)
-        /* inspectorBackground */ QColor(255, 255, 255),    // #FFFFFF (Pure White details pane)
-        /* codeBoxBackground   */ QColor(253, 242, 248),    // #FDF2F8 (Clean light pink summary/path/meta box)
-        /* hoverSurface        */ QColor(252, 231, 243),    // #FCE7F3 (Clean light pink hover)
-        /* borderColor         */ QColor(249, 168, 212),    // #F9A8D4 (Clean light pink border)
-        /* borderSubtle        */ QColor(252, 231, 243),    // #FCE7F3 (Soft pink hairline divider)
-        /* shadowColor         */ QColor(15, 23, 42, 22),   // Soft subtle window shadow
+        /* surfaceBackground   */ QColor(255, 255, 255, 242), // Frosted translucent white surface over backdrop blur
+        /* elevatedBackground  */ QColor(246, 246, 249, 235), // Subtle neutral control track
+        /* windowBackground    */ QColor(255, 255, 255),      // Pure crisp white dialog surface
+        /* inspectorBackground */ QColor(252, 252, 254, 245), // Subtle airy right preview panel
+        /* codeBoxBackground   */ QColor(248, 248, 250, 240), // Calm neutral container for Path / Size / Summary
+        /* hoverSurface        */ QColor(0, 0, 0, 9),         // Whisper-light neutral hover state
+        /* borderColor         */ QColor(230, 230, 235),      // Soft neutral outer card border (no jarring pink box!)
+        /* borderSubtle        */ QColor(239, 239, 239),      // #EFEFEF neutral hairline divider
+        /* shadowColor         */ QColor(0, 0, 0, 15),        // Base ambient shadow tone
 
-        /* iconPrimary         */ QColor(44, 44, 50),       // #2C2C32 (Soft black glyph inside light pink tile)
-        /* iconSecondary       */ QColor(92, 92, 102),
-        /* iconAccentPdf       */ QColor(190, 24, 93),      // Deep rose-pink
-        /* iconAccentDoc       */ QColor(44, 44, 50),       // Soft black
-        /* iconAccentSheet     */ QColor(21, 128, 61),      // Deep green
-        /* iconAccentCode      */ QColor(44, 44, 50),       // Soft black
-        /* iconAccentImage     */ QColor(180, 83, 9),       // Deep amber
+        /* iconPrimary         */ QColor(42, 42, 48),         // Soft charcoal vector stroke
+        /* iconSecondary       */ QColor(110, 110, 110),      // #6E6E6E muted stroke
+        /* iconAccentPdf       */ QColor(190, 24, 93),        // Refined rose stroke
+        /* iconAccentDoc       */ QColor(42, 42, 48),
+        /* iconAccentSheet     */ QColor(21, 128, 61),
+        /* iconAccentCode      */ QColor(42, 42, 48),
+        /* iconAccentImage     */ QColor(180, 83, 9),
 
-        /* badgePdfBg          */ QColor(252, 231, 243),
-        /* badgePdfText        */ QColor(44, 44, 50),
-        /* badgeDocBg          */ QColor(252, 231, 243),
-        /* badgeDocText        */ QColor(44, 44, 50),
-        /* badgeTxtBg          */ QColor(253, 242, 248),
-        /* badgeTxtText        */ QColor(44, 44, 50),
-        /* badgeCodeBg         */ QColor(252, 231, 243),
-        /* badgeCodeText       */ QColor(44, 44, 50),
-        /* badgeSheetBg        */ QColor(253, 242, 248),
-        /* badgeSheetText      */ QColor(44, 44, 50),
-        /* badgeImageBg        */ QColor(253, 242, 248),
-        /* badgeImageText      */ QColor(44, 44, 50),
+        /* badgePdfBg          */ QColor(253, 242, 248),
+        /* badgePdfText        */ QColor(28, 28, 33),
+        /* badgeDocBg          */ QColor(246, 246, 249),
+        /* badgeDocText        */ QColor(28, 28, 33),
+        /* badgeTxtBg          */ QColor(246, 246, 249),
+        /* badgeTxtText        */ QColor(28, 28, 33),
+        /* badgeCodeBg         */ QColor(246, 246, 249),
+        /* badgeCodeText       */ QColor(28, 28, 33),
+        /* badgeSheetBg        */ QColor(246, 246, 249),
+        /* badgeSheetText      */ QColor(28, 28, 33),
+        /* badgeImageBg        */ QColor(246, 246, 249),
+        /* badgeImageText      */ QColor(28, 28, 33),
 
-        /* semanticBadgeBg     */ QColor(252, 231, 243),
-        /* semanticBadgeText   */ QColor(44, 44, 50),
-        /* contentBadgeBg      */ QColor(253, 242, 248),
-        /* contentBadgeText    */ QColor(44, 44, 50),
-        /* pinnedBadgeBg       */ QColor(251, 207, 232),
-        /* pinnedBadgeText     */ QColor(44, 44, 50)
+        /* semanticBadgeBg     */ QColor(253, 242, 248),
+        /* semanticBadgeText   */ QColor(28, 28, 33),
+        /* contentBadgeBg      */ QColor(246, 246, 249),
+        /* contentBadgeText    */ QColor(28, 28, 33),
+        /* pinnedBadgeBg       */ QColor(253, 242, 248),
+        /* pinnedBadgeText     */ QColor(28, 28, 33)
     };
 }
 

@@ -28,10 +28,10 @@ TrayController::~TrayController() {
 void TrayController::initialize() {
     m_menu = new QMenu();
     m_menu->setStyleSheet(QStringLiteral(
-        "QMenu { background-color: #FFFFFF; color: #0F0F12; border: 1px solid #F9A8D4; border-radius: 8px; padding: 5px; font-family: 'Segoe UI'; font-size: 9pt; }"
-        "QMenu::item { padding: 6px 22px 6px 12px; border-radius: 5px; color: #0F0F12; }"
-        "QMenu::item:selected { background-color: #FCE7F3; color: #0F0F12; font-weight: 600; }"
-        "QMenu::separator { height: 1px; background: #FCE7F3; margin: 4px 8px; }"));
+        "QMenu { background-color: #FFFFFF; color: #1C1C21; border: 1px solid #E6E6EB; border-radius: 8px; padding: 5px; font-family: 'Segoe UI'; font-size: 9pt; }"
+        "QMenu::item { padding: 6px 22px 6px 12px; border-radius: 5px; color: #1C1C21; }"
+        "QMenu::item:selected { background-color: #FDF2F8; color: #1C1C21; font-weight: 500; }"
+        "QMenu::separator { height: 1px; background: #EFEFEF; margin: 4px 8px; }"));
 
     m_showSearchAction = m_menu->addAction(QStringLiteral("Open Search"));
     connect(m_showSearchAction, &QAction::triggered, this, &TrayController::onShowSearchTriggered);
