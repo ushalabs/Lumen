@@ -25,6 +25,7 @@
 #include <QPainterPath>
 #include <QPen>
 #include <QPointer>
+#include <QRegion>
 #include <QResizeEvent>
 #include <QRunnable>
 #include <QScreen>
@@ -54,7 +55,7 @@ DesktopSearchBar::DesktopSearchBar(QWidget* parent)
     m_searchPool.setExpiryTimeout(5000);
 
     m_slideAnim = new QVariantAnimation(this);
-    m_slideAnim->setDuration(155);
+    m_slideAnim->setDuration(145);
     m_slideAnim->setEasingCurve(QEasingCurve::OutCubic);
     connect(m_slideAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant& value) {
         m_slideProgress = value.toReal();
@@ -62,6 +63,23 @@ DesktopSearchBar::DesktopSearchBar(QWidget* parent)
             applyOpenBarGeometry();
         }
         update();
+    });
+
+    m_popupAnim = new QVariantAnimation(this);
+    m_popupAnim->setDuration(140);
+    m_popupAnim->setEasingCurve(QEasingCurve::OutCubic);
+    connect(m_popupAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant& value) {
+        m_popupProgress = value.toReal();
+        if (m_popupExpanded) {
+            updateExpandedGeometry();
+        }
+        update();
+    });
+    connect(m_popupAnim, &QVariantAnimation::finished, this, [this]() {
+        m_popupProgress = 1.0;
+        if (m_popupExpanded) {
+            updateExpandedGeometry();
+        }
     });
 
     m_searchEdit = new QLineEdit(this);
@@ -347,6 +365,10 @@ void DesktopSearchBar::collapsePopupAndDeactivate(bool clearQuery) {
 
     m_slideAnim->stop();
     m_slideProgress = 0.0;
+    if (m_popupAnim != nullptr) {
+        m_popupAnim->stop();
+    }
+    m_popupProgress = 0.0;
 
     if (clearQuery && !m_searchEdit->text().isEmpty()) {
         m_searchEdit->clear();
@@ -488,10 +510,19 @@ void DesktopSearchBar::setPopupExpanded(bool expanded) {
         m_barExpanded = true;
         m_popupExpanded = true;
         m_searchEdit->show();
+
+        m_popupAnim->stop();
+        m_popupProgress = 0.0;
+        m_popupAnim->setStartValue(0.0);
+        m_popupAnim->setEndValue(1.0);
+        m_popupAnim->start();
         updateExpandedGeometry();
         m_popupWidget->show();
     } else {
+        m_popupAnim->stop();
+        m_popupProgress = 0.0;
         m_popupExpanded = false;
+        m_popupWidget->clearMask();
         m_popupWidget->hide();
         if (m_barExpanded) {
             m_slideProgress = 1.0;
@@ -519,40 +550,60 @@ void DesktopSearchBar::updateExpandedGeometry() {
 
     QRect workArea(0, 0, 1920, 1080);
     int popW = kPopupWidth;
+    int startW = kBarWidth;
     if (screen != nullptr) {
         workArea = screen->availableGeometry();
         popW = std::min(kPopupWidth, std::max(kBarWidth, workArea.width() - 16));
+        startW = std::min(kBarWidth, std::max(kIconSize, workArea.width() - 16));
     }
 
-    const int popH = m_popupWidget->desiredPopupHeight();
-    const int totalH = kBarHeight + kPopupGap + popH;
+    const int targetPopH = m_popupWidget->desiredPopupHeight();
+    const int targetTotalH = kBarHeight + kPopupGap + targetPopH;
+    const qreal progress = qBound(0.0, m_popupProgress, 1.0);
+
+    const int curW = std::max(startW, static_cast<int>(qRound(startW + (popW - startW) * progress)));
+    const int curTotalH = std::max(kBarHeight, static_cast<int>(qRound(kBarHeight + (targetTotalH - kBarHeight) * progress)));
+    const int curPopH = std::max(0, curTotalH - kBarHeight - kPopupGap);
 
     int targetWinX = m_iconAnchorPos.x();
     if (m_slidesLeft) {
         const int anchorRight = m_iconAnchorPos.x() + kIconSize;
-        targetWinX = anchorRight - popW;
+        targetWinX = anchorRight - curW;
     }
     const int minX = workArea.left() + 4;
-    const int maxX = qMax(minX, workArea.right() - popW - 4);
+    const int maxX = qMax(minX, workArea.right() - curW - 4);
     targetWinX = qBound(minX, targetWinX, maxX);
 
     int targetWinY = m_iconAnchorPos.y();
-    if (targetWinY + totalH > workArea.bottom() - 4) {
-        targetWinY = qMax(workArea.top() + 4, workArea.bottom() - totalH - 4);
+    if (targetWinY + curTotalH > workArea.bottom() - 4) {
+        targetWinY = qMax(workArea.top() + 4, workArea.bottom() - curTotalH - 4);
     }
 
-    if (width() != popW || height() != totalH) {
-        setFixedSize(popW, totalH);
+    if (width() != curW || height() != curTotalH) {
+        setFixedSize(curW, curTotalH);
     }
     if (pos().x() != targetWinX || pos().y() != targetWinY) {
         move(targetWinX, targetWinY);
     }
 
     updateSearchInputGeometry();
+
+    const int fullInnerW = std::max(0, popW - kHorizontalShadow);
+    const int visibleInnerW = std::max(0, curW - kHorizontalShadow);
     m_popupWidget->setGeometry(kShadowLeft,
                                kShadowTop + kBarCardHeight + kPopupGap,
-                               popW - kHorizontalShadow,
-                               popH);
+                               fullInnerW,
+                               targetPopH);
+
+    if (progress < 0.999) {
+        if (visibleInnerW > 0 && curPopH > 0) {
+            m_popupWidget->setMask(QRegion(0, 0, visibleInnerW, curPopH));
+        } else {
+            m_popupWidget->setMask(QRegion(0, 0, 1, 1));
+        }
+    } else {
+        m_popupWidget->clearMask();
+    }
 }
 
 void DesktopSearchBar::dispatchInspectorPreviewFetch(const search::FileSearchResult& result) {

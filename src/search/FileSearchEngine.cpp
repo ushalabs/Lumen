@@ -18,6 +18,7 @@
 #include <QMutexLocker>
 #include <QRegularExpression>
 #include <QSet>
+#include <QStandardPaths>
 
 #include <algorithm>
 #include <cmath>
@@ -40,6 +41,65 @@ QString extractParentDir(const QString& fullNativePath) {
         return fullNativePath.left(lastSep);
     }
     return {};
+}
+
+struct FolderHierarchyKey {
+    int tier = 2;  // 0 = Desktop folder, 1 = Drive root (X:\Folder), 2 = Subfolders ordered shallowest -> deepest
+    int depth = 0; // 0 = direct main-library child, 1 = subfolder, 2 = sub-subfolder, ...
+};
+
+QString normalizeDirForRank(const QString& path) {
+    QString clean = QDir::toNativeSeparators(QDir::cleanPath(path));
+    while (clean.size() > 3 && clean.endsWith(QLatin1Char('\\'))) {
+        clean.chop(1);
+    }
+    return clean;
+}
+
+FolderHierarchyKey computeFolderHierarchy(const QString& nativePath,
+                                          const QString& desktopRootClean,
+                                          const QStringList& watchedRootsClean) {
+    const QString clean = normalizeDirForRank(nativePath);
+    const QString parent = extractParentDir(clean);
+
+    // 1. Desktop Folders (direct children of Windows Desktop)
+    if ((!desktopRootClean.isEmpty() && parent.compare(desktopRootClean, Qt::CaseInsensitive) == 0) ||
+        parent.endsWith(QStringLiteral("\\Desktop"), Qt::CaseInsensitive)) {
+        return {0, 0};
+    }
+
+    // 2. Root Folders directly under Drive Letters (e.g. C:\Projects, D:\Media, E:\Work)
+    if (clean.size() >= 4 && clean.at(1) == QLatin1Char(':') && clean.at(2) == QLatin1Char('\\') &&
+        clean.indexOf(QLatin1Char('\\'), 3) < 0) {
+        return {1, 0};
+    }
+
+    // 3+. Subfolders: rank Desktop subtrees and watched-root subtrees by nesting depth ascending
+    if (!desktopRootClean.isEmpty() &&
+        clean.startsWith(desktopRootClean + QLatin1Char('\\'), Qt::CaseInsensitive)) {
+        const QString rel = clean.mid(desktopRootClean.size() + 1);
+        return {2, std::max(1, static_cast<int>(rel.count(QLatin1Char('\\'))))};
+    }
+
+    QString bestRoot;
+    for (const QString& root : watchedRootsClean) {
+        if (root.isEmpty()) {
+            continue;
+        }
+        const QString prefix = root.endsWith(QLatin1Char('\\')) ? root : (root + QLatin1Char('\\'));
+        if (clean.startsWith(prefix, Qt::CaseInsensitive) && root.size() > bestRoot.size()) {
+            bestRoot = root;
+        }
+    }
+
+    if (!bestRoot.isEmpty()) {
+        const qsizetype prefixLen = bestRoot.endsWith(QLatin1Char('\\')) ? bestRoot.size() : (bestRoot.size() + 1);
+        const QString rel = clean.mid(prefixLen);
+        return {2, static_cast<int>(rel.count(QLatin1Char('\\')))};
+    }
+
+    const int totalSlashes = static_cast<int>(clean.count(QLatin1Char('\\')));
+    return {2, std::max(1, totalSlashes - 1)};
 }
 
 bool passesMetadataFilters(const FileSearchResult& item, const SearchFilters& filters) {
@@ -514,6 +574,34 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
     const int ftsFetchLimit = std::max(limit * 8, 400);
     const int docFtsFetchLimit = std::max(limit * 4, 160);
 
+    const QString desktopRootClean = normalizeDirForRank(
+        QStandardPaths::writableLocation(QStandardPaths::DesktopLocation));
+    QStringList watchedRootsClean;
+    for (const QString& rawRoot : core::SettingsManager::instance().indexingSettings().watchedFolders) {
+        const QString cleaned = normalizeDirForRank(rawRoot);
+        if (!cleaned.isEmpty()) {
+            watchedRootsClean.append(cleaned);
+        }
+    }
+
+    auto applyDirectoryRank = [&](FileSearchResult* item) {
+        if (!item->isDirectory) {
+            return;
+        }
+        const FolderHierarchyKey key = computeFolderHierarchy(item->path, desktopRootClean, watchedRootsClean);
+        item->folderTier = key.tier;
+        item->folderDepth = key.depth;
+        if (key.tier == 0) {
+            item->score += 220.0;
+        } else if (key.tier == 1) {
+            item->score += 150.0;
+        } else if (key.depth == 0) {
+            item->score += 70.0;
+        } else {
+            item->score -= std::min(400.0, static_cast<double>(key.depth) * 45.0);
+        }
+    };
+
     auto collectRow = [&](sqlite3_stmt* stmt) {
         const qint64 id = sqlite3_column_int64(stmt, 0);
         if (candidateMap.contains(id)) {
@@ -546,30 +634,23 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
             item.matchStart = matchStart;
             item.matchLength = matchLen;
             item.matchType = SearchResultMatchType::Filename;
+            applyDirectoryRank(&item);
             candidateMap.insert(id, std::move(item));
         }
     };
 
-    QString dirOnlyClause;
-    QString dirJoinClause;
-    if (activeFilters.includeFolderItems && !activeFilters.includeFileItems) {
-        dirOnlyClause = QStringLiteral(" AND is_dir = 1");
-        dirJoinClause = QStringLiteral(" AND f.is_dir = 1");
-    } else if (activeFilters.includeFileItems && !activeFilters.includeFolderItems) {
-        dirOnlyClause = QStringLiteral(" AND is_dir = 0");
-        dirJoinClause = QStringLiteral(" AND f.is_dir = 0");
-    }
-
-    // Pass 1: B-tree index prefix lookup on idx_files_name (handles 1-2 char queries AND guarantees exact/prefix hits)
-    const QString firstToken = queryTokensLower.isEmpty() ? effectiveQueryLower : queryTokensLower.first();
-    if (activeFilters.includeFilenameMatches && !firstToken.isEmpty()) {
+    auto runPrefixPass = [&](const QString& extraSqlClause, int maxRows) {
+        const QString firstToken = queryTokensLower.isEmpty() ? effectiveQueryLower : queryTokensLower.first();
+        if (firstToken.isEmpty()) {
+            return;
+        }
         const QString upperBound = firstToken + QChar(0xFFFF);
         const QByteArray prefixSql = QStringLiteral(
             "SELECT id, path, name, extension, size, mtime, is_dir "
             "FROM files "
             "WHERE name >= ?1 AND name <= ?2 COLLATE NOCASE%1 "
             "LIMIT ?3;")
-                                         .arg(dirOnlyClause)
+                                         .arg(extraSqlClause)
                                          .toUtf8();
         database::ScopedStmt stmt;
         if (sqlite3_prepare_v2(m_readDb, prefixSql.constData(), -1, stmt.receive(), nullptr) == SQLITE_OK) {
@@ -577,17 +658,18 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
             const QByteArray upperUtf8 = upperBound.toUtf8();
             sqlite3_bind_text(stmt.get(), 1, lowerUtf8.constData(), lowerUtf8.size(), SQLITE_STATIC);
             sqlite3_bind_text(stmt.get(), 2, upperUtf8.constData(), upperUtf8.size(), SQLITE_STATIC);
-            sqlite3_bind_int(stmt.get(), 3, prefixFetchLimit);
+            sqlite3_bind_int(stmt.get(), 3, maxRows);
 
             while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
                 collectRow(stmt.get());
             }
         }
-    }
+    };
 
-    // Pass 2: FTS5 trigram substring lookup for queries with >= 3 character token(s)
-    if (activeFilters.includeFilenameMatches && !ftsTrigTokens.isEmpty() &&
-        (!cancellationToken || !cancellationToken->load(std::memory_order_relaxed))) {
+    auto runFtsPass = [&](const QString& extraJoinClause, int maxRows) {
+        if (ftsTrigTokens.isEmpty()) {
+            return;
+        }
         const QString matchExpr = ftsTrigTokens.join(QStringLiteral(" AND "));
         const QByteArray ftsSql = QStringLiteral(
             "SELECT f.id, f.path, f.name, f.extension, f.size, f.mtime, f.is_dir "
@@ -595,17 +677,38 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
             "JOIN files f ON f.id = files_fts.rowid "
             "WHERE files_fts MATCH ?1%1 "
             "LIMIT ?2;")
-                                      .arg(dirJoinClause)
+                                      .arg(extraJoinClause)
                                       .toUtf8();
         database::ScopedStmt ftsStmt;
         if (sqlite3_prepare_v2(m_readDb, ftsSql.constData(), -1, ftsStmt.receive(), nullptr) == SQLITE_OK) {
             const QByteArray matchUtf8 = matchExpr.toUtf8();
             sqlite3_bind_text(ftsStmt.get(), 1, matchUtf8.constData(), matchUtf8.size(), SQLITE_STATIC);
-            sqlite3_bind_int(ftsStmt.get(), 2, ftsFetchLimit);
+            sqlite3_bind_int(ftsStmt.get(), 2, maxRows);
 
             while (sqlite3_step(ftsStmt.get()) == SQLITE_ROW) {
                 collectRow(ftsStmt.get());
             }
+        }
+    };
+
+    // Pass 1 & Pass 2: B-tree prefix + FTS5 trigram lookup (separating files vs folders so folders never starve or lose hierarchy)
+    const QString firstToken = queryTokensLower.isEmpty() ? effectiveQueryLower : queryTokensLower.first();
+    if (activeFilters.includeFilenameMatches && !firstToken.isEmpty()) {
+        if (activeFilters.includeFileItems) {
+            runPrefixPass(QStringLiteral(" AND is_dir = 0"), prefixFetchLimit);
+        }
+        if (activeFilters.includeFolderItems) {
+            runPrefixPass(QStringLiteral(" AND is_dir = 1 ORDER BY LENGTH(path) ASC"), prefixFetchLimit);
+        }
+    }
+
+    if (activeFilters.includeFilenameMatches && !ftsTrigTokens.isEmpty() &&
+        (!cancellationToken || !cancellationToken->load(std::memory_order_relaxed))) {
+        if (activeFilters.includeFileItems) {
+            runFtsPass(QStringLiteral(" AND f.is_dir = 0"), ftsFetchLimit);
+        }
+        if (activeFilters.includeFolderItems) {
+            runFtsPass(QStringLiteral(" AND f.is_dir = 1 ORDER BY LENGTH(f.path) ASC"), ftsFetchLimit);
         }
     }
 
@@ -826,12 +929,21 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
                                        activeFilters.maxSizeBytes >= 0 ||
                                        activeFilters.modifiedAfterEpoch >= 0;
         if (hasMetadataFilter) {
+            QString filterDirClause;
+            if (activeFilters.includeFolderItems && !activeFilters.includeFileItems) {
+                filterDirClause = QStringLiteral(" AND is_dir = 1");
+            } else if (activeFilters.includeFileItems && !activeFilters.includeFolderItems) {
+                filterDirClause = QStringLiteral(" AND is_dir = 0");
+            }
+            const QString orderClause = folderModeOnly
+                                            ? QStringLiteral("ORDER BY LENGTH(path) ASC, mtime DESC LIMIT ?1;")
+                                            : QStringLiteral("ORDER BY mtime DESC LIMIT ?1;");
             const QByteArray filterSql = QStringLiteral(
                 "SELECT id, path, name, extension, size, mtime, is_dir "
                 "FROM files "
                 "WHERE 1=1%1 "
-                "ORDER BY mtime DESC LIMIT ?1;")
-                                             .arg(dirOnlyClause)
+                "%2")
+                                             .arg(filterDirClause, orderClause)
                                              .toUtf8();
             database::ScopedStmt filterStmt;
             if (sqlite3_prepare_v2(m_readDb, filterSql.constData(), -1, filterStmt.receive(), nullptr) == SQLITE_OK) {
@@ -855,6 +967,7 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
                         continue;
                     }
                     item.score = 100.0 + std::clamp(static_cast<double>(item.mtime - 1577836800) / 86400.0 * 0.01, 0.0, 35.0);
+                    applyDirectoryRank(&item);
                     candidateMap.insert(fid, std::move(item));
                     if (candidateMap.size() >= limit) {
                         break;
@@ -887,23 +1000,65 @@ QVector<FileSearchResult> FileSearchEngine::searchFiles(
         finalResults.append(std::move(item));
     }
 
+    auto folderHierarchyCmp = [](const FileSearchResult& a, const FileSearchResult& b) {
+        if (a.isPinned != b.isPinned) {
+            return a.isPinned > b.isPinned;
+        }
+        if (a.folderTier != b.folderTier) {
+            return a.folderTier < b.folderTier;
+        }
+        if (a.folderDepth != b.folderDepth) {
+            return a.folderDepth < b.folderDepth;
+        }
+        if (std::abs(a.score - b.score) > 1e-4) {
+            return a.score > b.score;
+        }
+        if (a.mtime != b.mtime) {
+            return a.mtime > b.mtime;
+        }
+        return a.name.compare(b.name, Qt::CaseInsensitive) < 0;
+    };
+
+    const bool foldersOnlyMode = activeFilters.includeFolderItems && !activeFilters.includeFileItems;
     const int sortCount = std::min(static_cast<int>(finalResults.size()), limit);
-    std::partial_sort(
-        finalResults.begin(),
-        finalResults.begin() + sortCount,
-        finalResults.end(),
-        [](const FileSearchResult& a, const FileSearchResult& b) {
-            if (std::abs(a.score - b.score) > 1e-4) {
-                return a.score > b.score;
-            }
-            if (a.mtime != b.mtime) {
-                return a.mtime > b.mtime;
-            }
-            return a.name.compare(b.name, Qt::CaseInsensitive) < 0;
-        });
+    if (foldersOnlyMode) {
+        std::partial_sort(finalResults.begin(), finalResults.begin() + sortCount, finalResults.end(), folderHierarchyCmp);
+    } else {
+        std::partial_sort(
+            finalResults.begin(),
+            finalResults.begin() + sortCount,
+            finalResults.end(),
+            [](const FileSearchResult& a, const FileSearchResult& b) {
+                if (std::abs(a.score - b.score) > 1e-4) {
+                    return a.score > b.score;
+                }
+                if (a.mtime != b.mtime) {
+                    return a.mtime > b.mtime;
+                }
+                return a.name.compare(b.name, Qt::CaseInsensitive) < 0;
+            });
+    }
 
     if (finalResults.size() > limit) {
         finalResults.resize(limit);
+    }
+
+    // Ensure folders shown in All mode also strictly obey Desktop -> Drive Root -> Sub -> Deepest Last
+    if (!foldersOnlyMode) {
+        QVector<int> folderSlots;
+        QVector<FileSearchResult> sortedFolders;
+        for (int i = 0; i < finalResults.size(); ++i) {
+            if (finalResults.at(i).isDirectory) {
+                folderSlots.append(i);
+                sortedFolders.append(finalResults.at(i));
+            }
+        }
+        if (sortedFolders.size() > 1) {
+            std::sort(sortedFolders.begin(), sortedFolders.end(), folderHierarchyCmp);
+            for (int k = 0; k < folderSlots.size(); ++k) {
+                finalResults[folderSlots[k]] = std::move(sortedFolders[k]);
+            }
+        }
     }
 
     if (outElapsedMs != nullptr) {
@@ -1125,10 +1280,11 @@ QString FileSearchEngine::fetchDocumentPreviewText(qint64 fileId,
         if (folderCount == 0 && fileCount == 0) {
             return QStringLiteral("Empty Folder");
         }
-        const QString suffix = truncated ? QStringLiteral("+") : QString();
-        return QStringLiteral("Folder · %1%2 subfolder%3, %4%2 file%5\nContains: %6")
+        const QString itemSuffix = truncated ? QStringLiteral("+ items") : QStringLiteral(" items");
+        return QStringLiteral("Folder · %1%2 (%3 subfolder%4, %5 file%6)\nContains: %7")
+            .arg(folderCount + fileCount)
+            .arg(itemSuffix)
             .arg(folderCount)
-            .arg(suffix)
             .arg(folderCount == 1 ? QString() : QStringLiteral("s"))
             .arg(fileCount)
             .arg(fileCount == 1 ? QString() : QStringLiteral("s"))

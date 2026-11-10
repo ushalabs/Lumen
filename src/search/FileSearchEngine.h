@@ -54,6 +54,8 @@ struct FileSearchResult {
     int matchLength = 0;
     bool isPinned = false;
     bool isDirectory = false;
+    int folderTier = 2;
+    int folderDepth = 0;
 
     // Phase 2 & Phase 3 Document Content / Semantic fields
     SearchResultMatchType matchType = SearchResultMatchType::Filename;

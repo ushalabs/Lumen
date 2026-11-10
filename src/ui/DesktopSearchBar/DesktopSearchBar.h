@@ -120,6 +120,7 @@ private:
     QLineEdit* m_searchEdit = nullptr;
     SearchPopupWidget* m_popupWidget = nullptr;
     QVariantAnimation* m_slideAnim = nullptr;
+    QVariantAnimation* m_popupAnim = nullptr;
 
     QThreadPool m_searchPool;
     search::FileSearchEngine m_searchEngine;
@@ -128,6 +129,7 @@ private:
     quint64 m_previewGeneration = 0;
 
     qreal m_slideProgress = 0.0;
+    qreal m_popupProgress = 0.0;
     bool m_barExpanded = false;
     bool m_popupExpanded = false;
     bool m_slidesLeft = true;
