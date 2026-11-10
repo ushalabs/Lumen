@@ -9,7 +9,56 @@
 
 namespace lumen::ui {
 
+namespace {
+QPainterPath buildCustomRoundedPath(const QRectF& box,
+                                    qreal tl,
+                                    qreal tr,
+                                    qreal br,
+                                    qreal bl) {
+    const qreal maxR = qMin(box.width(), box.height()) * 0.5;
+    tl = qBound(0.0, tl, maxR);
+    tr = qBound(0.0, tr, maxR);
+    br = qBound(0.0, br, maxR);
+    bl = qBound(0.0, bl, maxR);
+
+    QPainterPath path;
+    path.moveTo(box.left() + tl, box.top());
+    path.lineTo(box.right() - tr, box.top());
+    if (tr > 0.0) {
+        path.arcTo(QRectF(box.right() - 2.0 * tr, box.top(), 2.0 * tr, 2.0 * tr), 90.0, -90.0);
+    }
+    path.lineTo(box.right(), box.bottom() - br);
+    if (br > 0.0) {
+        path.arcTo(QRectF(box.right() - 2.0 * br, box.bottom() - 2.0 * br, 2.0 * br, 2.0 * br), 0.0, -90.0);
+    }
+    path.lineTo(box.left() + bl, box.bottom());
+    if (bl > 0.0) {
+        path.arcTo(QRectF(box.left(), box.bottom() - 2.0 * bl, 2.0 * bl, 2.0 * bl), 270.0, -90.0);
+    }
+    path.lineTo(box.left(), box.top() + tl);
+    if (tl > 0.0) {
+        path.arcTo(QRectF(box.left(), box.top(), 2.0 * tl, 2.0 * tl), 180.0, -90.0);
+    }
+    path.closeSubpath();
+    return path;
+}
+} // namespace
+
 void BrandingIcon::paintLumenMark(QPainter* painter, const QRectF& targetRect, bool /*darkTheme*/) {
+    if (painter == nullptr || targetRect.isEmpty()) {
+        return;
+    }
+    const qreal size = qMin(targetRect.width(), targetRect.height());
+    const qreal radius = size * 0.28;
+    paintLumenMark(painter, targetRect, radius, radius, radius, radius);
+}
+
+void BrandingIcon::paintLumenMark(QPainter* painter,
+                                  const QRectF& targetRect,
+                                  qreal topLeftRadius,
+                                  qreal topRightRadius,
+                                  qreal bottomRightRadius,
+                                  qreal bottomLeftRadius) {
     if (painter == nullptr || targetRect.isEmpty()) {
         return;
     }
@@ -23,43 +72,36 @@ void BrandingIcon::paintLumenMark(QPainter* painter, const QRectF& targetRect, b
                      size,
                      size);
 
-    // Rounded Downshift/Lumen magenta/pink gradient badge (#F63D98 -> #EC1680 -> #BD0D6B)
-    const qreal radius = size * 0.28;
+    // Pure pink Downshift/Lumen gradient badge (#F63D98 -> #EC1680 -> #BD0D6B) with zero outer or white border
     QLinearGradient pinkGrad(box.topLeft(), box.bottomLeft());
-    pinkGrad.setColorAt(0.0, QColor(246, 61, 152)); // #F63D98 (luminous top)
-    pinkGrad.setColorAt(0.5, QColor(236, 22, 128)); // #EC1680 (Downshift primary)
-    pinkGrad.setColorAt(1.0, QColor(189, 13, 107)); // #BD0D6B (rich magenta base)
+    pinkGrad.setColorAt(0.0, QColor(246, 61, 152)); // #F63D98
+    pinkGrad.setColorAt(0.5, QColor(236, 22, 128)); // #EC1680
+    pinkGrad.setColorAt(1.0, QColor(189, 13, 107)); // #BD0D6B
 
     painter->setPen(Qt::NoPen);
     painter->setBrush(pinkGrad);
-    painter->drawRoundedRect(box, radius, radius);
+    painter->drawPath(buildCustomRoundedPath(
+        box, topLeftRadius, topRightRadius, bottomRightRadius, bottomLeftRadius));
 
-    // Subtle inner highlight border
-    QPen rimPen(QColor(255, 255, 255, 75));
-    rimPen.setWidthF(qMax(1.0, size * 0.04));
-    painter->setPen(rimPen);
-    painter->setBrush(Qt::NoBrush);
-    const qreal inset = size * 0.03;
-    painter->drawRoundedRect(box.adjusted(inset, inset, -inset, -inset), radius * 0.9, radius * 0.9);
-
-    // Search lens circle
+    // Clean centered search lens
     const QPointF lensCenter(box.left() + size * 0.44, box.top() + size * 0.44);
-    const qreal lensRadius = size * 0.21;
+    const qreal lensRadius = size * 0.195;
     QPen lensPen(QColor(255, 255, 255));
-    lensPen.setWidthF(qMax(1.6, size * 0.105));
+    lensPen.setWidthF(qMax(1.6, size * 0.095));
     lensPen.setCapStyle(Qt::RoundCap);
     painter->setPen(lensPen);
+    painter->setBrush(Qt::NoBrush);
     painter->drawEllipse(lensCenter, lensRadius, lensRadius);
 
     // Search handle
     const QPointF handleStart(lensCenter.x() + lensRadius * 0.72, lensCenter.y() + lensRadius * 0.72);
-    const QPointF handleEnd(box.left() + size * 0.76, box.top() + size * 0.76);
+    const QPointF handleEnd(box.left() + size * 0.74, box.top() + size * 0.74);
     painter->drawLine(handleStart, handleEnd);
 
     // Warm golden spark dot inside the lens representing "Lumen" intelligence
     painter->setPen(Qt::NoPen);
     painter->setBrush(QColor(251, 191, 36));
-    const qreal sparkRadius = size * 0.068;
+    const qreal sparkRadius = size * 0.064;
     painter->drawEllipse(QPointF(lensCenter.x() - lensRadius * 0.18, lensCenter.y() - lensRadius * 0.18),
                          sparkRadius,
                          sparkRadius);

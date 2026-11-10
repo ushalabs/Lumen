@@ -27,7 +27,7 @@ public:
     static constexpr int kVerticalShadow = kShadowTop + kShadowBottom;
 
     static constexpr int kBarCardHeight = 56;
-    static constexpr int kIconSize = 54 + kHorizontalShadow;          // 72px widget -> 54x54 visible card
+    static constexpr int kIconSize = kBarCardHeight + kHorizontalShadow; // 74px widget -> 56x56 pure pink icon
     static constexpr int kBarWidth = 464 + kHorizontalShadow;         // 482px widget -> 464px visible bar
     static constexpr int kBarHeight = kBarCardHeight + kVerticalShadow; // 74px widget -> 56px visible bar
     static constexpr int kPopupWidth = 900 + kHorizontalShadow;       // 918px widget -> 900px visible workspace

@@ -14,6 +14,14 @@ public:
     // Renders the Lumen emblem directly into a QPainter within targetRect (used for app/tray icon).
     static void paintLumenMark(QPainter* painter, const QRectF& targetRect, bool darkTheme = false);
 
+    // Renders the pure pink Lumen emblem with explicit corner radii (0 radius for flush seam attachment).
+    static void paintLumenMark(QPainter* painter,
+                               const QRectF& targetRect,
+                               qreal topLeftRadius,
+                               qreal topRightRadius,
+                               qreal bottomRightRadius,
+                               qreal bottomLeftRadius);
+
     // Renders a clean, minimal vector search magnifier icon for the search bar input.
     static void paintSearchIcon(QPainter* painter,
                                 const QRectF& targetRect,

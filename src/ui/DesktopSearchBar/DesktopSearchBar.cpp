@@ -22,6 +22,7 @@
 #include <QMetaObject>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPen>
 #include <QPointer>
 #include <QResizeEvent>
@@ -396,9 +397,8 @@ QRectF DesktopSearchBar::cardRect() const {
 
 QRectF DesktopSearchBar::iconTileRect() const {
     const QRectF c = cardRect();
-    // Icon stays on the left edge whether collapsed, slid left from right dock, or slid right from left dock
-    const qreal inset = m_barExpanded ? 10.0 : 9.0;
-    return QRectF(c.left() + inset, c.top() + inset, 36.0, 36.0);
+    // Pure pink Lumen emblem fills the entire 56x56 left cap with zero outer white padding or border
+    return QRectF(c.left(), c.top(), kBarCardHeight, kBarCardHeight);
 }
 
 QRectF DesktopSearchBar::clearButtonHitRect() const {
@@ -416,9 +416,9 @@ void DesktopSearchBar::updateSearchInputGeometry() {
     }
     const QRectF c = cardRect();
     const bool hasText = !m_searchEdit->text().trimmed().isEmpty();
-    const int leftOffset = static_cast<int>(c.left()) + 56;
+    const int leftOffset = static_cast<int>(c.left()) + kBarCardHeight + 14;
     const int rightReserve = hasText ? 44 : 18;
-    const int editWidth = std::max(0, static_cast<int>(c.width()) - 56 - rightReserve);
+    const int editWidth = std::max(0, static_cast<int>(c.width()) - (kBarCardHeight + 14) - rightReserve);
     if (editWidth < 40) {
         m_searchEdit->setGeometry(leftOffset, static_cast<int>(c.top()) + 11, 0, 34);
     } else {
@@ -806,32 +806,103 @@ void DesktopSearchBar::paintEvent(QPaintEvent* /*event*/) {
     }
 
     const bool searchFocused = m_barExpanded && (m_isSearchActive || m_searchEdit->hasFocus());
+    const qreal pinkW = kBarCardHeight;
+    const QRectF pinkRect(cRect.left(), cRect.top(), pinkW, kBarCardHeight);
 
-    // 2. Subtle 2px active-focus glow strictly around the compact search bar pill when typing (not around whole workspace!)
-    if (m_barExpanded && !m_popupExpanded && searchFocused) {
-        painter.setPen(QPen(QColor(236, 22, 128, 34), 4.0));
-        painter.setBrush(Qt::NoBrush);
-        painter.drawRoundedRect(cRect.adjusted(-1.0, -1.0, 1.0, 1.0), radius + 1.0, radius + 1.0);
-    } else if (!m_barExpanded && m_iconHovered) {
-        painter.setPen(QPen(QColor(236, 22, 128, 42), 3.0));
-        painter.setBrush(Qt::NoBrush);
-        painter.drawRoundedRect(cRect.adjusted(-1.0, -1.0, 1.0, 1.0), radius + 1.0, radius + 1.0);
+    if (!m_barExpanded) {
+        // Collapsed state: pure pink Lumen icon only (no white margin, no outer border)
+        BrandingIcon::paintLumenMark(&painter, cRect, radius, radius, radius, radius);
+        return;
     }
 
-    // 3. Main translucent frosted card with neutral #E6E6EB border (no loud magenta frame around workspace!)
-    const QColor cardBorder = (m_barExpanded && !m_popupExpanded && searchFocused)
+    const QColor cardBorder = (!m_popupExpanded && searchFocused)
                                   ? QColor(236, 22, 128, 175)
-                                  : (!m_barExpanded && m_iconHovered
-                                         ? QColor(236, 22, 128, 140)
-                                         : theme.borderColor);
-    painter.setPen(QPen(cardBorder, 1.0));
-    painter.setBrush(theme.surfaceBackground);
-    painter.drawRoundedRect(cRect, radius, radius);
+                                  : theme.borderColor;
+    const qreal seamX = cRect.left() + pinkW;
 
-    // 4. Lumen Brand Icon ALWAYS on the left edge
-    BrandingIcon::paintLumenMark(&painter, iconTileRect(), false);
+    // 2. White search bar + optional results workspace cleanly attached to the right edge of the pink Lumen icon
+    if (!m_popupExpanded) {
+        if (cRect.width() > pinkW + 2.0) {
+            const qreal fillLeft = qMax(cRect.left() + 4.0, seamX - 6.0);
+            QPainterPath fillPath;
+            fillPath.moveTo(fillLeft, cRect.top());
+            fillPath.lineTo(cRect.right() - radius, cRect.top());
+            fillPath.arcTo(QRectF(cRect.right() - 2.0 * radius, cRect.top(), 2.0 * radius, 2.0 * radius), 90.0, -90.0);
+            fillPath.lineTo(cRect.right(), cRect.bottom() - radius);
+            fillPath.arcTo(QRectF(cRect.right() - 2.0 * radius, cRect.bottom() - 2.0 * radius, 2.0 * radius, 2.0 * radius), 0.0, -90.0);
+            fillPath.lineTo(fillLeft, cRect.bottom());
+            fillPath.closeSubpath();
 
-    // 5. Expanded bar clear button & neutral hairline divider + active search focus indicator
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(theme.surfaceBackground);
+            painter.drawPath(fillPath);
+
+            // Stroke border strictly on the white search bar (never wrapping around the pink Lumen side)
+            QPainterPath whiteOutline;
+            whiteOutline.moveTo(seamX, cRect.top());
+            whiteOutline.lineTo(cRect.right() - radius, cRect.top());
+            whiteOutline.arcTo(QRectF(cRect.right() - 2.0 * radius, cRect.top(), 2.0 * radius, 2.0 * radius), 90.0, -90.0);
+            whiteOutline.lineTo(cRect.right(), cRect.bottom() - radius);
+            whiteOutline.arcTo(QRectF(cRect.right() - 2.0 * radius, cRect.bottom() - 2.0 * radius, 2.0 * radius, 2.0 * radius), 0.0, -90.0);
+            whiteOutline.lineTo(seamX, cRect.bottom());
+
+            if (searchFocused) {
+                painter.save();
+                painter.setClipRect(QRectF(seamX, 0.0, width() - seamX, height()));
+                QPen glowPen(QColor(236, 22, 128, 34), 4.0);
+                glowPen.setCapStyle(Qt::FlatCap);
+                painter.setPen(glowPen);
+                painter.setBrush(Qt::NoBrush);
+                painter.drawPath(whiteOutline);
+                painter.restore();
+            }
+            QPen borderPen(cardBorder, 1.0);
+            borderPen.setCapStyle(Qt::FlatCap);
+            painter.setPen(borderPen);
+            painter.setBrush(Qt::NoBrush);
+            painter.drawPath(whiteOutline);
+        }
+
+        // Paint pure pink Lumen badge cleanly on top with flat right edge attached to the white search bar
+        BrandingIcon::paintLumenMark(&painter, pinkRect, radius, 0.0, 0.0, radius);
+    } else {
+        const qreal dividerY = cRect.top() + kBarCardHeight;
+
+        QPainterPath whiteFillPath;
+        whiteFillPath.moveTo(seamX - 4.0, cRect.top());
+        whiteFillPath.lineTo(cRect.right() - radius, cRect.top());
+        whiteFillPath.arcTo(QRectF(cRect.right() - 2.0 * radius, cRect.top(), 2.0 * radius, 2.0 * radius), 90.0, -90.0);
+        whiteFillPath.lineTo(cRect.right(), cRect.bottom() - radius);
+        whiteFillPath.arcTo(QRectF(cRect.right() - 2.0 * radius, cRect.bottom() - 2.0 * radius, 2.0 * radius, 2.0 * radius), 0.0, -90.0);
+        whiteFillPath.lineTo(cRect.left() + radius, cRect.bottom());
+        whiteFillPath.arcTo(QRectF(cRect.left(), cRect.bottom() - 2.0 * radius, 2.0 * radius, 2.0 * radius), 270.0, -90.0);
+        whiteFillPath.lineTo(cRect.left(), dividerY - 4.0);
+        whiteFillPath.lineTo(seamX - 4.0, dividerY - 4.0);
+        whiteFillPath.closeSubpath();
+
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(theme.surfaceBackground);
+        painter.drawPath(whiteFillPath);
+
+        QPainterPath whiteOutline;
+        whiteOutline.moveTo(seamX, cRect.top());
+        whiteOutline.lineTo(cRect.right() - radius, cRect.top());
+        whiteOutline.arcTo(QRectF(cRect.right() - 2.0 * radius, cRect.top(), 2.0 * radius, 2.0 * radius), 90.0, -90.0);
+        whiteOutline.lineTo(cRect.right(), cRect.bottom() - radius);
+        whiteOutline.arcTo(QRectF(cRect.right() - 2.0 * radius, cRect.bottom() - 2.0 * radius, 2.0 * radius, 2.0 * radius), 0.0, -90.0);
+        whiteOutline.lineTo(cRect.left() + radius, cRect.bottom());
+        whiteOutline.arcTo(QRectF(cRect.left(), cRect.bottom() - 2.0 * radius, 2.0 * radius, 2.0 * radius), 270.0, -90.0);
+        whiteOutline.lineTo(cRect.left(), dividerY);
+
+        painter.setPen(QPen(cardBorder, 1.0));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawPath(whiteOutline);
+
+        // Paint pure pink Lumen badge cleanly in top-left corner with zero border
+        BrandingIcon::paintLumenMark(&painter, pinkRect, radius, 0.0, 0.0, 0.0);
+    }
+
+    // 4. Expanded bar clear button & neutral hairline divider + active search focus indicator
     if (m_barExpanded) {
         if (!m_searchEdit->text().isEmpty() && cRect.width() > 140.0) {
             const QRectF clearRect = clearButtonHitRect();
@@ -850,14 +921,14 @@ void DesktopSearchBar::paintEvent(QPaintEvent* /*event*/) {
 
         if (m_popupExpanded) {
             const qreal dividerY = cRect.top() + kBarCardHeight;
-            // Neutral #EFEFEF divider across top search row
+            // Neutral #EFEFEF divider across top search row starting at the white search section
             painter.setPen(QPen(theme.borderSubtle, 1.0));
-            painter.drawLine(QPointF(cRect.left() + 1.0, dividerY),
+            painter.drawLine(QPointF(seamX, dividerY),
                              QPointF(cRect.right() - 1.0, dividerY));
 
             // Dynamic 2px soft pink focus accent fading smoothly across active search input area
             if (searchFocused) {
-                const qreal lineLeft = cRect.left() + 56.0;
+                const qreal lineLeft = seamX + 14.0;
                 const qreal lineRight = cRect.right() - 56.0;
                 if (lineRight > lineLeft + 20.0) {
                     QLinearGradient glowGrad(lineLeft, dividerY, lineRight, dividerY);
