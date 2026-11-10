@@ -1,14 +1,21 @@
 Unicode true
 RequestExecutionLevel user
+ManifestSupportedOS all
+ManifestDPIAware true
+ManifestDPIAwareness PerMonitorV2,System
 SetCompressor /SOLID lzma
 SetCompressorDictSize 32
+
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 !include "x64.nsh"
 !include "WinVer.nsh"
 
+!define STARTUP_RUN_KEY "Software\Microsoft\Windows\CurrentVersion\Run"
+!define STARTUP_VALUE "UshaLabs.Lumen"
+
 Name "Lumen ${VERSION}"
-Caption "Lumen ${VERSION} Setup — UshaLabs"
+Caption "Lumen ${VERSION} Setup - UshaLabs"
 OutFile "${SETUP_OUTPUT}"
 InstallDir "$LOCALAPPDATA\Programs\Lumen"
 InstallDirRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen" "InstallLocation"
@@ -19,8 +26,9 @@ UninstallIcon "${PROJECT_ROOT}\assets\icons\lumen.ico"
 VIProductVersion "${VERSION}.0"
 VIAddVersionKey "ProductName" "Lumen"
 VIAddVersionKey "CompanyName" "UshaLabs"
-VIAddVersionKey "FileDescription" "Lumen — Lightweight Offline Intelligent Search for Windows"
+VIAddVersionKey "FileDescription" "Lumen - Windows Setup Installer by UshaLabs"
 VIAddVersionKey "FileVersion" "${VERSION}"
+VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "LegalCopyright" "Copyright (c) 2026 UshaLabs. All rights reserved."
 
 ShowInstDetails show
@@ -28,14 +36,14 @@ ShowUninstDetails show
 
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TITLE "Lumen by UshaLabs"
-!define MUI_WELCOMEPAGE_TEXT "Welcome to the installation of Lumen — Lightweight Offline Intelligent Search for Windows.$\r$\n$\r$\nDeveloped by UshaLabs.$\r$\n$\r$\nLumen combines instant filename discovery, deep content search inside PDF, DOCX, and Markdown files, and 100% offline neural semantic search powered by embedded ONNX Runtime.$\r$\n$\r$\nClick Next to continue."
+!define MUI_WELCOMEPAGE_TEXT "Welcome to the installation of Lumen - Lightweight Offline Intelligent Search for Windows.$\r$\n$\r$\nDeveloped by UshaLabs.$\r$\n$\r$\nLumen combines instant filename discovery, deep content search inside PDF, DOCX, and Markdown files, and 100% offline neural semantic search powered by embedded ONNX Runtime.$\r$\n$\r$\nAll required C++ and Qt runtimes are included for Windows 10 and Windows 11 (x64). Click Next to continue."
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${PROJECT_ROOT}\LICENSE"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 
 !define MUI_FINISHPAGE_TITLE "Lumen Installation Complete"
-!define MUI_FINISHPAGE_TEXT "Lumen has been installed on your PC.$\r$\n$\r$\nYou can launch Lumen immediately, or access it at any time from your Windows Desktop or with the global shortcut Ctrl+Alt+Space."
+!define MUI_FINISHPAGE_TEXT "Lumen has been installed on your PC.$\r$\n$\r$\nDeveloped by UshaLabs.$\r$\n$\r$\nYou can launch Lumen immediately, or open it at any time from your Start Menu, Desktop shortcut, or the global shortcut Ctrl+Alt+Space."
 !define MUI_FINISHPAGE_RUN "$INSTDIR\Lumen.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Launch Lumen now"
 !insertmacro MUI_PAGE_FINISH
@@ -44,56 +52,149 @@ ShowUninstDetails show
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
+Var Isolated
+Var RegistryKey
+Var Shortcut
+Var DesktopShortcut
+Var Arguments
+Var Result
+Var Output
+Var InstallSizeKB
+
 Function .onInit
   ${IfNot} ${RunningX64}
-    MessageBox MB_ICONSTOP "Lumen requires 64-bit Windows."
+    MessageBox MB_ICONSTOP "Lumen requires 64-bit Windows 10 or Windows 11."
     Abort
   ${EndIf}
   ${IfNot} ${AtLeastWin10}
-    MessageBox MB_ICONSTOP "Lumen requires Windows 10 or newer."
+    MessageBox MB_ICONSTOP "Lumen requires Windows 10 or Windows 11 (x64)."
     Abort
+  ${EndIf}
+
+  SetRegView 64
+  SetShellVarContext current
+  StrCpy $Isolated "0"
+
+  ${GetParameters} $Arguments
+  ClearErrors
+  ${GetOptions} $Arguments "/ISOLATEDTEST" $Result
+  ${IfNot} ${Errors}
+    StrCpy $Isolated "1"
   ${EndIf}
 FunctionEnd
 
 Section "Lumen" Main
+  ${If} $Isolated != "1"
+    ; Stop any running Lumen instance before upgrading files
+    nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /IM Lumen.exe'
+    Pop $Result
+    Pop $Output
+    ${If} $Result == "0"
+      Sleep 500
+    ${EndIf}
+    nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /F /T /IM Lumen.exe'
+    Pop $Result
+    Pop $Output
+    Sleep 250
+  ${EndIf}
+
   SetOutPath "$INSTDIR"
   SetOverwrite on
 
   !include "${INSTALL_FILES}"
 
-  ; Write uninstaller
+  ${GetSize} "$INSTDIR" "/S=0K" $InstallSizeKB $0 $1
+  WriteINIStr "$INSTDIR\lumen-setup.ini" "Setup" "IsolatedTest" "$Isolated"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
-  ; Create shortcuts
-  CreateDirectory "$SMPROGRAMS\UshaLabs"
-  CreateShortcut "$SMPROGRAMS\UshaLabs\Lumen.lnk" "$INSTDIR\Lumen.exe" "" "$INSTDIR\Lumen.exe" 0
-  CreateShortcut "$DESKTOP\Lumen.lnk" "$INSTDIR\Lumen.exe" "" "$INSTDIR\Lumen.exe" 0
+  ; Keep WorkingDirectory anchored to $INSTDIR for all shortcuts
+  SetOutPath "$INSTDIR"
+  ${If} $Isolated == "1"
+    StrCpy $RegistryKey "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen.PackagingTest"
+    CreateDirectory "$INSTDIR\StartMenu"
+    CreateDirectory "$INSTDIR\Desktop"
+    StrCpy $Shortcut "$INSTDIR\StartMenu\Lumen.lnk"
+    StrCpy $DesktopShortcut "$INSTDIR\Desktop\Lumen.lnk"
+  ${Else}
+    StrCpy $RegistryKey "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen"
+    CreateDirectory "$SMPROGRAMS\UshaLabs"
+    StrCpy $Shortcut "$SMPROGRAMS\UshaLabs\Lumen.lnk"
+    CreateShortcut "$SMPROGRAMS\UshaLabs\Uninstall Lumen.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0
+    StrCpy $DesktopShortcut "$DESKTOP\Lumen.lnk"
+  ${EndIf}
 
-  ; Register in Add/Remove Programs
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen" "DisplayName" "Lumen — Intelligent Search for Windows"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen" "DisplayVersion" "${VERSION}"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen" "Publisher" "UshaLabs"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen" "DisplayIcon" "$INSTDIR\Lumen.exe"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen" "UninstallString" '"$INSTDIR\Uninstall.exe"'
-  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen" "NoModify" 1
-  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen" "NoRepair" 1
+  CreateShortcut "$Shortcut" "$INSTDIR\Lumen.exe" "" "$INSTDIR\Lumen.exe" 0
+  CreateShortcut "$DesktopShortcut" "$INSTDIR\Lumen.exe" "" "$INSTDIR\Lumen.exe" 0
+
+  ; Register in 64-bit Add/Remove Programs
+  WriteRegStr HKCU "$RegistryKey" "DisplayName" "Lumen"
+  WriteRegStr HKCU "$RegistryKey" "DisplayVersion" "${VERSION}"
+  WriteRegStr HKCU "$RegistryKey" "Publisher" "UshaLabs"
+  WriteRegStr HKCU "$RegistryKey" "URLInfoAbout" "https://github.com/ushalabs/Lumen"
+  WriteRegStr HKCU "$RegistryKey" "HelpLink" "https://github.com/ushalabs/Lumen"
+  WriteRegStr HKCU "$RegistryKey" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKCU "$RegistryKey" "DisplayIcon" "$INSTDIR\Lumen.exe,0"
+  WriteRegStr HKCU "$RegistryKey" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
+  WriteRegStr HKCU "$RegistryKey" "QuietUninstallString" '$\"$INSTDIR\Uninstall.exe$\" /S'
+  WriteRegDWORD HKCU "$RegistryKey" "EstimatedSize" $InstallSizeKB
+  WriteRegDWORD HKCU "$RegistryKey" "NoModify" 1
+  WriteRegDWORD HKCU "$RegistryKey" "NoRepair" 1
 SectionEnd
 
+Function un.onInit
+  SetRegView 64
+  SetShellVarContext current
+  ReadINIStr $Isolated "$INSTDIR\lumen-setup.ini" "Setup" "IsolatedTest"
+  ${If} $Isolated == "1"
+    StrCpy $RegistryKey "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen.PackagingTest"
+  ${Else}
+    StrCpy $Isolated "0"
+    StrCpy $RegistryKey "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen"
+  ${EndIf}
+FunctionEnd
+
 Section "Uninstall"
-  ; Kill running Lumen if any
-  nsExec::ExecToStack 'taskkill /F /IM Lumen.exe'
+  ${If} $Isolated != "1"
+    nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /IM Lumen.exe'
+    Pop $Result
+    Pop $Output
+    ${If} $Result == "0"
+      Sleep 500
+    ${EndIf}
+    nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /F /T /IM Lumen.exe'
+    Pop $Result
+    Pop $Output
+    Sleep 250
+  ${EndIf}
 
   ; Remove shortcuts
-  Delete "$SMPROGRAMS\UshaLabs\Lumen.lnk"
-  RMDir "$SMPROGRAMS\UshaLabs"
-  Delete "$DESKTOP\Lumen.lnk"
+  ${If} $Isolated == "1"
+    Delete "$INSTDIR\StartMenu\Lumen.lnk"
+    RMDir "$INSTDIR\StartMenu"
+    Delete "$INSTDIR\Desktop\Lumen.lnk"
+    RMDir "$INSTDIR\Desktop"
+  ${Else}
+    Delete "$SMPROGRAMS\UshaLabs\Lumen.lnk"
+    Delete "$SMPROGRAMS\UshaLabs\Uninstall Lumen.lnk"
+    RMDir "$SMPROGRAMS\UshaLabs"
+    Delete "$DESKTOP\Lumen.lnk"
 
-  ; Remove files
+    ; Remove per-user sign-in autostart entry if it points to this installation
+    ReadRegStr $Result HKCU "${STARTUP_RUN_KEY}" "${STARTUP_VALUE}"
+    ${If} $Result == '$\"$INSTDIR\Lumen.exe$\"'
+      DeleteRegValue HKCU "${STARTUP_RUN_KEY}" "${STARTUP_VALUE}"
+    ${EndIf}
+  ${EndIf}
+
+  ; Remove installed files
   !include "${UNINSTALL_FILES}"
+  Delete "$INSTDIR\lumen-setup.ini"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
 
-  ; Clean registry
-  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen"
+  ; Clean Add/Remove Programs registration if it belongs to this install location
+  ReadRegStr $Result HKCU "$RegistryKey" "InstallLocation"
+  ${If} $Result == "$INSTDIR"
+    DeleteRegKey HKCU "$RegistryKey"
+  ${EndIf}
 SectionEnd

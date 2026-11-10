@@ -3,8 +3,8 @@
 IDI_ICON1 ICON "icons/lumen.ico"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,1,0,0
- PRODUCTVERSION 0,1,0,0
+ FILEVERSION 0,5,0,0
+ PRODUCTVERSION 0,5,0,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS VS_FF_DEBUG
@@ -20,13 +20,13 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "UshaLabs"
-            VALUE "FileDescription", "Lumen — Lightweight Offline Intelligent Search for Windows"
-            VALUE "FileVersion", "0.1.0.0"
+            VALUE "FileDescription", "Lumen - Lightweight Offline Intelligent Search for Windows"
+            VALUE "FileVersion", "0.5.0.0"
             VALUE "InternalName", "Lumen.exe"
             VALUE "LegalCopyright", "Copyright (C) 2026 UshaLabs. All rights reserved."
             VALUE "OriginalFilename", "Lumen.exe"
             VALUE "ProductName", "Lumen"
-            VALUE "ProductVersion", "0.1.0.0"
+            VALUE "ProductVersion", "0.5.0.0"
         END
     END
     BLOCK "VarFileInfo"

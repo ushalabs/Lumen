@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(Lumen
-    VERSION 0.4.0
-    DESCRIPTION "Lumen — Lightweight Offline Intelligent Search for Windows"
+    VERSION 0.5.0
+    DESCRIPTION "Lumen - Lightweight Offline Intelligent Search for Windows"
     HOMEPAGE_URL "https://ushalabs.com"
     LANGUAGES C CXX RC
 )
@@ -121,6 +121,7 @@ target_link_libraries(lumen_lib PUBLIC
 add_executable(Lumen WIN32
     src/main.cpp
     assets/app.rc
+    assets/lumen.manifest
 )
 
 target_link_libraries(Lumen PRIVATE
