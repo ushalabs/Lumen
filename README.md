@@ -1,20 +1,22 @@
 <h1 align="center">
-<img src="assets/branding/lumen_logo.svg" alt="Lumen Logo" width="84" height="84" />
-<br />
+  <img src="assets/branding/lumen_logo.svg" alt="Lumen Logo" width="84" height="84" />
+  <br />
   Lumen
-  </h1>
+</h1>
 
 <p align="center">
-### Lightweight Offline Intelligent Search for Windows
+  <strong>Lightweight Offline Intelligent Search for Windows</strong>
+</p>
 
-[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078D4?style=flat-square&logo=windows)](https://github.com/ushalabs/Lumen)
-[![Language](https://img.shields.io/badge/Language-C%2B%2B20-00599C?style=flat-square&logo=cplusplus)](https://isocpp.org/)
-[![UI](https://img.shields.io/badge/UI-Qt%206%20Widgets%20%2B%20Win32-41CD52?style=flat-square&logo=qt)](https://www.qt.io/)
-[![Database](https://img.shields.io/badge/Database-SQLite%203%20(WAL%20%2B%20FTS5)-003B57?style=flat-square&logo=sqlite)](https://www.sqlite.org/)
-[![AI](https://img.shields.io/badge/AI-ONNX%20Runtime%20CPU%20(MiniLM%20INT8)-8B5CF6?style=flat-square)](https://onnxruntime.ai/)
-[![Installer](https://img.shields.io/badge/Installer-NSIS%20Setup%20(x64%20v0.5.1)-EC1680?style=flat-square&logo=windows11)](#installation-windows-10--11-x64)
-[![Privacy](https://img.shields.io/badge/Privacy-100%25%20Offline-10B981?style=flat-square)](https://github.com/ushalabs/Lumen)
-
+<p align="center">
+  <a href="https://github.com/ushalabs/Lumen"><img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078D4?style=flat-square&amp;logo=windows" alt="Platform" /></a>
+  <a href="https://isocpp.org/"><img src="https://img.shields.io/badge/Language-C%2B%2B20-00599C?style=flat-square&amp;logo=cplusplus" alt="Language" /></a>
+  <a href="https://www.qt.io/"><img src="https://img.shields.io/badge/UI-Qt%206%20Widgets%20%2B%20Win32-41CD52?style=flat-square&amp;logo=qt" alt="UI" /></a>
+  <a href="https://www.sqlite.org/"><img src="https://img.shields.io/badge/Database-SQLite%203%20(WAL%20%2B%20FTS5)-003B57?style=flat-square&amp;logo=sqlite" alt="Database" /></a>
+  <br />
+  <a href="https://onnxruntime.ai/"><img src="https://img.shields.io/badge/AI-ONNX%20Runtime%20CPU%20(MiniLM%20INT8)-8B5CF6?style=flat-square" alt="AI" /></a>
+  <a href="#installation-windows-10--11-x64"><img src="https://img.shields.io/badge/Installer-NSIS%20Setup%20(x64%20v0.5.1)-EC1680?style=flat-square&amp;logo=windows11" alt="Installer" /></a>
+  <a href="https://github.com/ushalabs/Lumen"><img src="https://img.shields.io/badge/Privacy-100%25%20Offline-10B981?style=flat-square" alt="Privacy" /></a>
 </p>
 
 ---
