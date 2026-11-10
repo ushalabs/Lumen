@@ -144,6 +144,8 @@ DesktopSearchBar::DesktopSearchBar(QWidget* parent)
                 platform::windows::DesktopIntegration::placeOnDesktopBottom(myHwnd);
             }
         });
+
+    platform::windows::DesktopIntegration::applyDesktopWidgetStyles(reinterpret_cast<HWND>(winId()));
 }
 
 DesktopSearchBar::~DesktopSearchBar() {

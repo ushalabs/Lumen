@@ -36,14 +36,14 @@ ShowUninstDetails show
 
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TITLE "Lumen by UshaLabs"
-!define MUI_WELCOMEPAGE_TEXT "Welcome to the installation of Lumen - Lightweight Offline Intelligent Search for Windows.$\r$\n$\r$\nDeveloped by UshaLabs.$\r$\n$\r$\nLumen combines instant filename discovery, deep content search inside PDF, DOCX, and Markdown files, and 100% offline neural semantic search powered by embedded ONNX Runtime.$\r$\n$\r$\nAll required C++ and Qt runtimes are included for Windows 10 and Windows 11 (x64). Click Next to continue."
+!define MUI_WELCOMEPAGE_TEXT "Welcome to the installation of Lumen - Lightweight Offline Intelligent Search for Windows.$\r$\n$\r$\nSole Developer: UshaLabs.$\r$\n$\r$\nLumen combines instant filename discovery across files of any size, deep content indexing for documents, spreadsheets, source code, and media metadata, and 100% offline semantic search powered by embedded ONNX Runtime.$\r$\n$\r$\nRuns quietly on startup in the Windows System Tray with its floating desktop icon and zero Taskbar footprint. All required C++ and Qt runtimes are bundled for Windows 10 and Windows 11 (x64)."
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${PROJECT_ROOT}\LICENSE"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 
 !define MUI_FINISHPAGE_TITLE "Lumen Installation Complete"
-!define MUI_FINISHPAGE_TEXT "Lumen has been installed on your PC.$\r$\n$\r$\nDeveloped by UshaLabs.$\r$\n$\r$\nYou can launch Lumen immediately, or open it at any time from your Start Menu, Desktop shortcut, or the global shortcut Ctrl+Alt+Space."
+!define MUI_FINISHPAGE_TEXT "Lumen has been installed on your PC.$\r$\n$\r$\nSole Developer: UshaLabs.$\r$\n$\r$\nLumen is configured to start automatically on Windows bootup in the System Tray with its interactive desktop icon (never on the Taskbar), and can also be opened via Start Menu or Ctrl+Alt+Space."
 !define MUI_FINISHPAGE_RUN "$INSTDIR\Lumen.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Launch Lumen now"
 !insertmacro MUI_PAGE_FINISH
@@ -55,7 +55,6 @@ ShowUninstDetails show
 Var Isolated
 Var RegistryKey
 Var Shortcut
-Var DesktopShortcut
 Var Arguments
 Var Result
 Var Output
@@ -112,19 +111,18 @@ Section "Lumen" Main
   ${If} $Isolated == "1"
     StrCpy $RegistryKey "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen.PackagingTest"
     CreateDirectory "$INSTDIR\StartMenu"
-    CreateDirectory "$INSTDIR\Desktop"
     StrCpy $Shortcut "$INSTDIR\StartMenu\Lumen.lnk"
-    StrCpy $DesktopShortcut "$INSTDIR\Desktop\Lumen.lnk"
+    CreateShortcut "$Shortcut" "$INSTDIR\Lumen.exe" "" "$INSTDIR\Lumen.exe" 0
   ${Else}
     StrCpy $RegistryKey "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumen"
     CreateDirectory "$SMPROGRAMS\UshaLabs"
     StrCpy $Shortcut "$SMPROGRAMS\UshaLabs\Lumen.lnk"
+    CreateShortcut "$Shortcut" "$INSTDIR\Lumen.exe" "" "$INSTDIR\Lumen.exe" 0
     CreateShortcut "$SMPROGRAMS\UshaLabs\Uninstall Lumen.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0
-    StrCpy $DesktopShortcut "$DESKTOP\Lumen.lnk"
-  ${EndIf}
 
-  CreateShortcut "$Shortcut" "$INSTDIR\Lumen.exe" "" "$INSTDIR\Lumen.exe" 0
-  CreateShortcut "$DesktopShortcut" "$INSTDIR\Lumen.exe" "" "$INSTDIR\Lumen.exe" 0
+    ; Start Lumen automatically on Windows bootup in the system tray with desktop icon
+    WriteRegStr HKCU "${STARTUP_RUN_KEY}" "${STARTUP_VALUE}" '$\"$INSTDIR\Lumen.exe$\"'
+  ${EndIf}
 
   ; Register in 64-bit Add/Remove Programs
   WriteRegStr HKCU "$RegistryKey" "DisplayName" "Lumen"
@@ -171,8 +169,6 @@ Section "Uninstall"
   ${If} $Isolated == "1"
     Delete "$INSTDIR\StartMenu\Lumen.lnk"
     RMDir "$INSTDIR\StartMenu"
-    Delete "$INSTDIR\Desktop\Lumen.lnk"
-    RMDir "$INSTDIR\Desktop"
   ${Else}
     Delete "$SMPROGRAMS\UshaLabs\Lumen.lnk"
     Delete "$SMPROGRAMS\UshaLabs\Uninstall Lumen.lnk"

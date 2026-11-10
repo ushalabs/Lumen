@@ -196,6 +196,14 @@ void TrayController::onSettingsTriggered() {
 
 void TrayController::onExitTriggered() {
     core::Logger::info(QStringLiteral("App"), QStringLiteral("User requested Exit Lumen from system tray."));
+    if (m_activeSettingsDialog != nullptr) {
+        m_activeSettingsDialog->close();
+    }
+    if (m_searchBar != nullptr) {
+        m_searchBar->collapsePopupAndDeactivate(false);
+        m_searchBar->hide();
+        m_searchBar->close();
+    }
     if (m_trayIcon != nullptr) {
         m_trayIcon->hide();
     }

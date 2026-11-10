@@ -28,7 +28,7 @@ bool LumenApplication::initialize(bool startBackgroundIndexer) {
     }
 
     core::Logger::instance().initialize(core::AppPaths::primaryLogFilePath());
-    core::Logger::info(QStringLiteral("App"), QStringLiteral("Starting UshaLabs Lumen v0.3.0 (Phase 2)."));
+    core::Logger::info(QStringLiteral("App"), QStringLiteral("Starting UshaLabs Lumen v0.5.0."));
 
     core::SettingsManager::instance().load();
 
@@ -95,14 +95,20 @@ void LumenApplication::shutdown() {
 
     core::Logger::info(QStringLiteral("App"), QStringLiteral("Shutting down Lumen cleanly."));
 
+    // Immediately remove desktop icon and system tray icon before joining background threads
+    if (m_searchBar) {
+        m_searchBar->collapsePopupAndDeactivate(false);
+        m_searchBar->hide();
+    }
+    m_trayController.reset();
+
     if (m_fileIndexer) {
         m_fileIndexer->stop();
         m_fileIndexer.reset();
     }
 
-    m_trayController.reset();
     if (m_searchBar) {
-        m_searchBar->hide();
+        m_searchBar->close();
         m_searchBar.reset();
     }
 

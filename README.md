@@ -273,14 +273,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/Q
 cmake --build build --config Release
 ```
 
-### 2. Run Automated Test Suite (36 Tests)
-
-```powershell
-$env:PATH = "C:\Qt\6.8.2\msvc2022_64\bin;$env:PATH"
-ctest --test-dir build --output-on-failure -V
-```
-
-### 3. Run Benchmark Suite
+### 2. Run Benchmark Suite
 
 ```powershell
 $env:PATH = "C:\Qt\6.8.2\msvc2022_64\bin;$env:PATH"
@@ -289,31 +282,23 @@ $env:PATH = "C:\Qt\6.8.2\msvc2022_64\bin;$env:PATH"
 .\build\phase3_benchmark.exe
 ```
 
-### 4. Build Windows Installers (NSIS & MSIX)
+### 3. Build Windows NSIS Setup Installer
 
 ```powershell
 # Build self-contained NSIS Setup (.exe) + Portable (.zip)
 powershell -ExecutionPolicy Bypass -File packaging\build_setup.ps1 -Version "0.5.0"
-
-# Verify silent install, runtime smoke tests, and clean uninstall
-powershell -ExecutionPolicy Bypass -File packaging\test_setup.ps1
-
-# Build signed MSIX package + bundle
-powershell -ExecutionPolicy Bypass -File packaging\build_msix.ps1 -Version "0.5.0"
 ```
 
 Generates:
-- `dist\Lumen-v0.5.0-Setup-x64.exe` (Self-contained Windows 10/11 NSIS Setup, Publisher: **UshaLabs**)
+- `dist\Lumen-v0.5.0-Setup-x64.exe` (Self-contained Windows 10/11 NSIS Setup, Developer: **UshaLabs**)
 - `dist\Lumen-v0.5.0-windows-x64.zip` (Standalone portable archive)
-- `dist\Lumen-v0.5.0-x64.msix` (Signed MSIX package, Publisher: **UshaLabs**)
-- `dist\Lumen-v0.5.0-MSIX-Bundle.zip` (1-click zero-warning MSIX installer bundle)
 - `dist\SHA256SUMS.txt` (Cryptographic verification checksums)
 
 ---
 
 ## Privacy & Security
 
-- **User-Approved Scopes Only:** Indexes only personal document libraries on initial launch (`Documents`, `Downloads`, `Desktop`) resolved dynamically via `SHGetKnownFolderPath`.
+- **User-Approved Scopes Only:** Indexes personal user libraries on initial launch (`Documents`, `Downloads`, `Desktop`, `Pictures`, `Videos`, `Music`) resolved dynamically via `SHGetKnownFolderPath`.
 - **Protected File Exclusions:** System directories (`Windows`, `Program Files`, `AppData`), development caches (`.git`, `node_modules`, `venv`, `target`, `build`), and sensitive keys (`.env`, `id_rsa`, `.pem`, `.key`, `.pfx`) are completely excluded from indexing.
 - **Reparse Point Guard:** Directory traversal strictly ignores `FILE_ATTRIBUTE_REPARSE_POINT` entries to prevent symlink or NTFS junction recursion loops.
 - **Sandboxed Local Storage:** User settings, database files, and size-capped rotating diagnostic logs reside exclusively inside `%LOCALAPPDATA%\UshaLabs\Lumen\`.

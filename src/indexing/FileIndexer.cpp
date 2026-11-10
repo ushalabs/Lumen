@@ -697,8 +697,9 @@ void FileIndexer::applyIncrementalChanges(const QVector<FileChangeEvent>& events
                            static_cast<qint64>(attrData.nFileSizeLow);
                 rec.mtime = fileTimeToUnixSeconds(attrData.ftLastWriteTime);
 
+                const bool isMedia = extraction::DocumentExtractor::isMediaMetadataExtension(rec.extension);
                 if (extraction::DocumentExtractor::isSupportedExtension(rec.extension) &&
-                    rec.size > 0 && rec.size <= maxDocumentBytes) {
+                    rec.size > 0 && (isMedia || rec.size <= maxDocumentBytes)) {
                     hasEligibleDocChange = true;
                 }
                 upserts.append(std::move(rec));

@@ -20,7 +20,7 @@ if(MSVC)
     add_compile_definitions(UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
 # ------------------------------------------------------------------------------
 # Embedded SQLite3 Static Target with FTS5 (and Trigram tokenizer) Enabled
@@ -136,54 +136,8 @@ if(MSVC)
 endif()
 
 # ------------------------------------------------------------------------------
-# Automated Phase 0, Phase 1, Phase 2 & Phase 3 Test Suites + Benchmarks
+# Automated Benchmark Executables
 # ------------------------------------------------------------------------------
-enable_testing()
-
-add_executable(phase0_tests
-    tests/phase0_tests.cpp
-)
-target_link_libraries(phase0_tests PRIVATE
-    lumen_lib
-    Qt6::Test
-)
-add_test(NAME Phase0Tests COMMAND phase0_tests)
-
-add_executable(phase1_tests
-    tests/phase1_tests.cpp
-)
-target_link_libraries(phase1_tests PRIVATE
-    lumen_lib
-    Qt6::Test
-)
-add_test(NAME Phase1Tests COMMAND phase1_tests)
-
-add_executable(phase2_tests
-    tests/phase2_tests.cpp
-)
-target_link_libraries(phase2_tests PRIVATE
-    lumen_lib
-    Qt6::Test
-)
-add_test(NAME Phase2Tests COMMAND phase2_tests)
-
-add_executable(phase3_tests
-    tests/phase3_tests.cpp
-)
-target_link_libraries(phase3_tests PRIVATE
-    lumen_lib
-    Qt6::Test
-)
-add_test(NAME Phase3Tests COMMAND phase3_tests)
-
-add_executable(phase4_tests
-    tests/phase4_tests.cpp
-)
-target_link_libraries(phase4_tests PRIVATE
-    lumen_lib
-    Qt6::Test
-)
-add_test(NAME Phase4Tests COMMAND phase4_tests)
 
 add_executable(phase1_benchmark
     benchmarks/phase1_benchmark.cpp

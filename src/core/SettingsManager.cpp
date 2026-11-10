@@ -101,6 +101,7 @@ bool SettingsManager::load(const QString& filePath) {
 
     QFile file(m_filePath);
     if (!file.exists()) {
+        m_startWithWindows = queryRegistryAutostartEnabled();
         locker.unlock();
         return save();
     }
@@ -132,7 +133,7 @@ bool SettingsManager::load(const QString& filePath) {
         m_desktopBarPos.setY(posObj.value(QStringLiteral("y")).toInt(0));
     }
 
-    m_startWithWindows = root.value(QStringLiteral("startWithWindows")).toBool(false);
+    m_startWithWindows = queryRegistryAutostartEnabled();
     m_appearancePreference = root.value(QStringLiteral("appearancePreference")).toString(QStringLiteral("light"));
     m_globalShortcut = root.value(QStringLiteral("globalShortcut")).toString(QStringLiteral("Ctrl+Alt+Space"));
 

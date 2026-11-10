@@ -237,6 +237,7 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     mainLayout->addLayout(btnRow);
 
     loadFromSettings();
+    platform::windows::DesktopIntegration::applyDesktopWidgetStyles(reinterpret_cast<HWND>(winId()));
 }
 
 void SettingsDialog::showEvent(QShowEvent* event) {
