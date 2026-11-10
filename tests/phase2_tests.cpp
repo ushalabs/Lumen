@@ -9,6 +9,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QImage>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -265,6 +266,116 @@ private slots:
         QVERIFY(bar.popupWidget()->desiredPopupHeight() >=
                 10 + lumen::ui::SearchPopupWidget::kContentRowHeight + lumen::ui::SearchPopupWidget::kFooterHeight);
         bar.hide();
+    }
+
+    void testXlsxSpreadsheetsCodeAndMediaMetadataExtraction() {
+        using lumen::extraction::DocumentExtractor;
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        // 1. Multi-sheet XLSX workbook (shared strings + numeric cells + multiple sheets)
+        const QString xlsxPath = dir.filePath(QStringLiteral("quarterly_budget.xlsx"));
+        {
+            QFile f(xlsxPath);
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write(DocumentExtractor::buildValidXlsxBytes({
+                {QStringLiteral("Q3 Revenue"),
+                 {{QStringLiteral("Department"), QStringLiteral("Budget")},
+                  {QStringLiteral("Engineering"), QStringLiteral("450000")}}},
+                {QStringLiteral("Headcount"),
+                 {{QStringLiteral("Team"), QStringLiteral("Engineers")},
+                  {QStringLiteral("Platform"), QStringLiteral("24")}}}
+            }));
+        }
+        const auto xlsxRes = DocumentExtractor::extractFromFile(xlsxPath);
+        QVERIFY(xlsxRes.success);
+        QCOMPARE(xlsxRes.pageCount, 2);
+        QVERIFY(xlsxRes.normalizedText.contains(QStringLiteral("[Sheet: Q3 Revenue]")));
+        QVERIFY(xlsxRes.normalizedText.contains(QStringLiteral("Engineering | 450000")));
+        QVERIFY(xlsxRes.normalizedText.contains(QStringLiteral("[Sheet: Headcount]")));
+        const int sheet2Idx = static_cast<int>(xlsxRes.normalizedText.indexOf(QStringLiteral("Platform")));
+        QVERIFY(sheet2Idx > 0);
+        const QString pageOffsetsJson = DocumentExtractor::serializePageOffsets(xlsxRes.pageOffsets);
+        QCOMPARE(DocumentExtractor::resolvePageForCharOffset(pageOffsetsJson, sheet2Idx), 2);
+
+        // 2. CSV with structured header enrichment
+        const QString csvPath = dir.filePath(QStringLiteral("cloud_costs.csv"));
+        {
+            QFile f(csvPath);
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write("service,region,monthly_usd\nPostgres,us-east,1850\n");
+        }
+        const auto csvRes = DocumentExtractor::extractFromFile(csvPath);
+        QVERIFY(csvRes.success);
+        QVERIFY(csvRes.normalizedText.contains(QStringLiteral("service: Postgres")));
+        QVERIFY(csvRes.normalizedText.contains(QStringLiteral("monthly_usd: 1850")));
+
+        // 3. C++ source code with camelCase/snake_case topic enrichment + binary NUL safety check
+        const QString cppPath = dir.filePath(QStringLiteral("db_pool.cpp"));
+        {
+            QFile f(cppPath);
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write("class ConnectionPoolManager { bool acquireWithExponentialBackoff(int maxRetries); };\n");
+        }
+        const auto cppRes = DocumentExtractor::extractFromFile(cppPath);
+        QVERIFY(cppRes.success);
+        QVERIFY(cppRes.normalizedText.contains(QStringLiteral("[C++ Source")));
+        QVERIFY(cppRes.normalizedText.contains(QStringLiteral("exponential")));
+        QVERIFY(cppRes.normalizedText.contains(QStringLiteral("acquireWithExponentialBackoff")));
+
+        const QString badCppPath = dir.filePath(QStringLiteral("corrupt_binary.cpp"));
+        {
+            QFile f(badCppPath);
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write(QByteArray(128, '\0'));
+        }
+        QVERIFY(!DocumentExtractor::extractFromFile(badCppPath).success);
+
+        // 4. Image metadata (PNG dimensions, tier, orientation, embedded description) & SVG text
+        const QString pngPath = dir.filePath(QStringLiteral("mountain_summit.png"));
+        {
+            QImage img(1920, 1080, QImage::Format_RGB32);
+            img.fill(Qt::white);
+            img.setText(QStringLiteral("Description"), QStringLiteral("Aerial glacier panorama at sunrise"));
+            QVERIFY(img.save(pngPath, "PNG"));
+        }
+        const auto pngRes = DocumentExtractor::extractFromFile(pngPath, 128); // even with tiny doc cap!
+        QVERIFY(pngRes.success);
+        QVERIFY(pngRes.normalizedText.contains(QStringLiteral("1920x1080")));
+        QVERIFY(pngRes.normalizedText.contains(QStringLiteral("1080p Full HD")));
+        QVERIFY(pngRes.normalizedText.contains(QStringLiteral("Landscape")));
+        QVERIFY(pngRes.normalizedText.contains(QStringLiteral("Aerial glacier panorama")));
+
+        const QString svgPath = dir.filePath(QStringLiteral("event_bus_diagram.svg"));
+        {
+            QFile f(svgPath);
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write("<svg viewBox=\"0 0 800 600\"><title>Microservice Event Bus</title>"
+                    "<text>Kafka Broker</text></svg>");
+        }
+        const auto svgRes = DocumentExtractor::extractFromFile(svgPath);
+        QVERIFY(svgRes.success);
+        QVERIFY(svgRes.normalizedText.contains(QStringLiteral("Microservice Event Bus")));
+        QVERIFY(svgRes.normalizedText.contains(QStringLiteral("Kafka Broker")));
+
+        // 5. MP4 video container header metadata + large-file cap bypass verification
+        const QString mp4Path = dir.filePath(QStringLiteral("alpine_drone_4k.mp4"));
+        {
+            QFile f(mp4Path);
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            QByteArray mp4 = DocumentExtractor::buildValidMp4MetadataBytes(
+                3840, 2160, 135, QStringLiteral("avc1"), QStringLiteral("Alpine Drone Sunset"));
+            mp4.append(QByteArray(4096, '\0')); // simulate media payload after moov
+            f.write(mp4);
+        }
+        const auto mp4Res = DocumentExtractor::extractFromFile(mp4Path, 512); // payload limit smaller than file!
+        QVERIFY(mp4Res.success);
+        QVERIFY(mp4Res.normalizedText.contains(QStringLiteral("3840x2160")));
+        QVERIFY(mp4Res.normalizedText.contains(QStringLiteral("4K UHD")));
+        QVERIFY(mp4Res.normalizedText.contains(QStringLiteral("02:15")));
+        QVERIFY(mp4Res.normalizedText.contains(QStringLiteral("H.264 AVC")));
+        QVERIFY(mp4Res.normalizedText.contains(QStringLiteral("Alpine Drone Sunset")));
     }
 
 private:

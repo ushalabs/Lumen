@@ -35,7 +35,7 @@ public:
     static constexpr int kContentBatchSize = 100;
     static constexpr int kSemanticBatchSize = 25;
     static constexpr int kDefaultMaxContentFiles = 5000;
-    static constexpr int kDefaultMaxSemanticFiles = 2000;
+    static constexpr int kDefaultMaxSemanticFiles = 5000;
     static constexpr qint64 kDefaultMaxDocumentBytes = 10LL * 1024LL * 1024LL;
 
     explicit FileIndexer(QObject* parent = nullptr);

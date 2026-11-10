@@ -73,6 +73,21 @@ private slots:
         QCOMPARE(semClean, QStringLiteral("financial earnings growth"));
         QVERIFY(!modeParsed.includeFilenameMatches);
         QVERIFY(modeParsed.includeSemanticMatches);
+
+        SearchFilters videoFilter;
+        FileSearchEngine::parseInlineQueryAndFilters(QStringLiteral("type:video drone"), SearchFilters{}, &videoFilter);
+        QVERIFY(videoFilter.extensions.contains(QStringLiteral("mp4")));
+        QVERIFY(videoFilter.extensions.contains(QStringLiteral("mkv")));
+
+        SearchFilters musicFilter;
+        FileSearchEngine::parseInlineQueryAndFilters(QStringLiteral("type:music"), SearchFilters{}, &musicFilter);
+        QVERIFY(musicFilter.extensions.contains(QStringLiteral("mp3")));
+        QVERIFY(musicFilter.extensions.contains(QStringLiteral("flac")));
+
+        SearchFilters sheetFilter;
+        FileSearchEngine::parseInlineQueryAndFilters(QStringLiteral("type:sheet"), SearchFilters{}, &sheetFilter);
+        QVERIFY(sheetFilter.extensions.contains(QStringLiteral("xlsx")));
+        QVERIFY(sheetFilter.extensions.contains(QStringLiteral("csv")));
     }
 
     void testPinnedFavoritesAndRecentSearches() {

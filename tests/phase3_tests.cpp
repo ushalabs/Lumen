@@ -1,5 +1,6 @@
 #include "core/AppPaths.h"
 #include "database/DatabaseManager.h"
+#include "extraction/DocumentExtractor.h"
 #include "indexing/FileIndexer.h"
 #include "search/FileSearchEngine.h"
 #include "semantic/DocumentChunker.h"
@@ -8,6 +9,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QImage>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -205,6 +207,93 @@ private slots:
         const auto related = searchEngine.findRelatedDocuments(financeFileId, 3, &relatedMs);
         QVERIFY(!related.isEmpty());
         QCOMPARE(related.first().name, QStringLiteral("corporate_tax_planning_2026.txt"));
+
+        lumen::semantic::SemanticEmbeddingEngine::instance().unloadModel();
+    }
+
+    void testCodeSpreadsheetsAndMediaVectorIndexing() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        auto& db = lumen::database::DatabaseManager::instance();
+        QVERIFY(db.clearAllFiles());
+
+        // 1. Source code file (.cpp)
+        {
+            QFile f(dir.filePath(QStringLiteral("db_pool.cpp")));
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write("// PostgreSQL connection pool with exponential retry backoff and failover health check\n"
+                    "class ConnectionPoolManager { bool acquireWithExponentialBackoff(int maxRetries); };\n");
+        }
+
+        // 2. Excel spreadsheet (.xlsx)
+        {
+            QFile f(dir.filePath(QStringLiteral("infra_expenses.xlsx")));
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write(lumen::extraction::DocumentExtractor::buildValidXlsxBytes({
+                {QStringLiteral("Cloud Infrastructure"),
+                 {{QStringLiteral("Category"), QStringLiteral("Service"), QStringLiteral("Annual Cost")},
+                  {QStringLiteral("Compute"), QStringLiteral("Kubernetes Cluster Nodes"), QStringLiteral("128000")}}}
+            }));
+        }
+
+        // 3. Video file (.mp4)
+        {
+            QFile f(dir.filePath(QStringLiteral("ridge_flight.mp4")));
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write(lumen::extraction::DocumentExtractor::buildValidMp4MetadataBytes(
+                3840, 2160, 95, QStringLiteral("hvc1"), QStringLiteral("Alpine Mountain Aerial Drone Footage")));
+        }
+
+        // 4. Image file (.png)
+        {
+            QImage img(1920, 1080, QImage::Format_RGB32);
+            img.fill(Qt::darkBlue);
+            img.setText(QStringLiteral("Description"), QStringLiteral("Golden sunset waves crashing ocean shoreline"));
+            QVERIFY(img.save(dir.filePath(QStringLiteral("coastline.png")), "PNG"));
+        }
+
+        lumen::indexing::FileIndexer indexer;
+        QSignalSpy doneSpy(&indexer, &lumen::indexing::FileIndexer::indexingCompleted);
+        indexer.startBackgroundIndexing(
+            {dir.path()},
+            {},
+            true,
+            500,
+            10LL * 1024LL * 1024LL,
+            true);
+
+        QVERIFY(doneSpy.wait(20000));
+        indexer.stop();
+
+        QCOMPARE(db.fileCount(), 4);
+        QCOMPARE(db.documentContentCount(), 4);
+        QCOMPARE(db.semanticEmbeddedFileCount(), 4);
+
+        lumen::search::FileSearchEngine searchEngine(db.databaseFilePath());
+        auto semFilters = lumen::search::FileSearchEngine::filtersForSearchMode(
+            lumen::search::SearchMode::Semantic);
+
+        // Verify natural-language vector queries find code, xlsx spreadsheet, video, and image!
+        const auto codeHits = searchEngine.searchFiles(
+            QStringLiteral("retry failed database connections"), semFilters, 4);
+        QVERIFY(!codeHits.isEmpty());
+        QCOMPARE(codeHits.first().name, QStringLiteral("db_pool.cpp"));
+
+        const auto sheetHits = searchEngine.searchFiles(
+            QStringLiteral("cloud compute infrastructure annual budget"), semFilters, 4);
+        QVERIFY(!sheetHits.isEmpty());
+        QCOMPARE(sheetHits.first().name, QStringLiteral("infra_expenses.xlsx"));
+
+        const auto videoHits = searchEngine.searchFiles(
+            QStringLiteral("4k aerial mountain drone video"), semFilters, 4);
+        QVERIFY(!videoHits.isEmpty());
+        QCOMPARE(videoHits.first().name, QStringLiteral("ridge_flight.mp4"));
+
+        const auto imgHits = searchEngine.searchFiles(
+            QStringLiteral("sunset ocean waves shoreline photo"), semFilters, 4);
+        QVERIFY(!imgHits.isEmpty());
+        QCOMPARE(imgHits.first().name, QStringLiteral("coastline.png"));
 
         lumen::semantic::SemanticEmbeddingEngine::instance().unloadModel();
     }

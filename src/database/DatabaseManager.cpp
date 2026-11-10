@@ -1,6 +1,7 @@
 #include "database/DatabaseManager.h"
 
 #include "core/Logger.h"
+#include "extraction/DocumentExtractor.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -824,16 +825,30 @@ QVector<ContentExtractionCandidate> DatabaseManager::queryCandidatesForContentEx
         return candidates;
     }
 
-    const char* sql =
+    QStringList docAndCodeExts;
+    QStringList mediaExts;
+    for (const QString& ext : extraction::DocumentExtractor::allContentSupportedExtensions()) {
+        const QString quoted = QStringLiteral("'%1'").arg(ext);
+        if (extraction::DocumentExtractor::isMediaMetadataExtension(ext)) {
+            mediaExts.append(quoted);
+        } else {
+            docAndCodeExts.append(quoted);
+        }
+    }
+
+    const QString sqlQuery = QStringLiteral(
         "SELECT f.id, f.path, f.extension, f.size, f.mtime "
         "FROM files f "
         "LEFT JOIN document_content dc ON dc.file_id = f.id "
-        "WHERE f.extension IN ('txt', 'md', 'pdf', 'docx') COLLATE NOCASE "
-        "  AND f.size > 0 "
-        "  AND f.size <= ?1 "
+        "WHERE ((f.extension IN (%1) COLLATE NOCASE AND f.size > 0 AND f.size <= ?1) "
+        "   OR (f.extension IN (%2) COLLATE NOCASE AND f.size > 0)) "
         "  AND (dc.file_id IS NULL OR dc.mtime != f.mtime) "
         "ORDER BY f.mtime DESC "
-        "LIMIT ?2;";
+        "LIMIT ?2;")
+                                 .arg(docAndCodeExts.join(QStringLiteral(", ")),
+                                      mediaExts.join(QStringLiteral(", ")));
+    const QByteArray sqlUtf8 = sqlQuery.toUtf8();
+    const char* sql = sqlUtf8.constData();
 
     ScopedStmt stmt;
     if (sqlite3_prepare_v2(m_db, sql, -1, stmt.receive(), nullptr) != SQLITE_OK) {

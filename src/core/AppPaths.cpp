@@ -62,19 +62,21 @@ QString AppPaths::primaryLogFilePath() {
 }
 
 QStringList AppPaths::defaultWatchedFolders() {
-    QStringList folders;
-    const QString docs = getKnownFolderPath(FOLDERID_Documents);
-    const QString downloads = getKnownFolderPath(FOLDERID_Downloads);
-    const QString desktop = getKnownFolderPath(FOLDERID_Desktop);
+    const KNOWNFOLDERID kDefaultFolders[] = {
+        FOLDERID_Documents,
+        FOLDERID_Downloads,
+        FOLDERID_Desktop,
+        FOLDERID_Pictures,
+        FOLDERID_Videos,
+        FOLDERID_Music
+    };
 
-    if (!docs.isEmpty() && QDir(docs).exists()) {
-        folders.append(QDir::toNativeSeparators(docs));
-    }
-    if (!downloads.isEmpty() && QDir(downloads).exists()) {
-        folders.append(QDir::toNativeSeparators(downloads));
-    }
-    if (!desktop.isEmpty() && QDir(desktop).exists()) {
-        folders.append(QDir::toNativeSeparators(desktop));
+    QStringList folders;
+    for (const KNOWNFOLDERID& folderId : kDefaultFolders) {
+        const QString path = getKnownFolderPath(folderId);
+        if (!path.isEmpty() && QDir(path).exists()) {
+            folders.append(QDir::toNativeSeparators(path));
+        }
     }
     folders.removeDuplicates();
     return folders;

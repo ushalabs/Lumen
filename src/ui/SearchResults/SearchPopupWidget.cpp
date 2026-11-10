@@ -2,6 +2,7 @@
 
 #include "core/SettingsManager.h"
 #include "database/DatabaseManager.h"
+#include "extraction/DocumentExtractor.h"
 #include "ui/BrandingIcon.h"
 #include "ui/Theme.h"
 
@@ -63,8 +64,10 @@ QString humanReadableFileType(const QString& extLower) {
         {QStringLiteral("docx"), QStringLiteral("Microsoft Word Document")},
         {QStringLiteral("doc"), QStringLiteral("Microsoft Word Document")},
         {QStringLiteral("xlsx"), QStringLiteral("Excel Spreadsheet")},
+        {QStringLiteral("xlsm"), QStringLiteral("Excel Macro Workbook")},
         {QStringLiteral("xls"), QStringLiteral("Excel Spreadsheet")},
         {QStringLiteral("csv"), QStringLiteral("CSV Data Table")},
+        {QStringLiteral("tsv"), QStringLiteral("TSV Data Table")},
         {QStringLiteral("pptx"), QStringLiteral("PowerPoint Presentation")},
         {QStringLiteral("md"), QStringLiteral("Markdown Document")},
         {QStringLiteral("txt"), QStringLiteral("Plain Text Document")},
@@ -76,10 +79,20 @@ QString humanReadableFileType(const QString& extLower) {
         {QStringLiteral("hpp"), QStringLiteral("C++ Header File")},
         {QStringLiteral("c"), QStringLiteral("C Source File")},
         {QStringLiteral("rs"), QStringLiteral("Rust Source File")},
+        {QStringLiteral("go"), QStringLiteral("Go Source File")},
+        {QStringLiteral("java"), QStringLiteral("Java Source File")},
+        {QStringLiteral("kt"), QStringLiteral("Kotlin Source File")},
+        {QStringLiteral("cs"), QStringLiteral("C# Source File")},
+        {QStringLiteral("swift"), QStringLiteral("Swift Source File")},
+        {QStringLiteral("rb"), QStringLiteral("Ruby Script")},
+        {QStringLiteral("php"), QStringLiteral("PHP Script")},
         {QStringLiteral("py"), QStringLiteral("Python Script")},
         {QStringLiteral("js"), QStringLiteral("JavaScript Source File")},
         {QStringLiteral("ts"), QStringLiteral("TypeScript Source File")},
+        {QStringLiteral("sh"), QStringLiteral("Shell Script")},
+        {QStringLiteral("ps1"), QStringLiteral("PowerShell Script")},
         {QStringLiteral("json"), QStringLiteral("JSON Configuration")},
+        {QStringLiteral("toml"), QStringLiteral("TOML Configuration")},
         {QStringLiteral("yaml"), QStringLiteral("YAML Configuration")},
         {QStringLiteral("yml"), QStringLiteral("YAML Configuration")},
         {QStringLiteral("xml"), QStringLiteral("XML Document")},
@@ -93,7 +106,26 @@ QString humanReadableFileType(const QString& extLower) {
         {QStringLiteral("jpeg"), QStringLiteral("JPEG Image")},
         {QStringLiteral("svg"), QStringLiteral("SVG Vector Graphic")},
         {QStringLiteral("webp"), QStringLiteral("WebP Image")},
+        {QStringLiteral("gif"), QStringLiteral("GIF Image")},
+        {QStringLiteral("bmp"), QStringLiteral("Bitmap Image")},
+        {QStringLiteral("tif"), QStringLiteral("TIFF Image")},
+        {QStringLiteral("tiff"), QStringLiteral("TIFF Image")},
+        {QStringLiteral("heic"), QStringLiteral("HEIC Image")},
         {QStringLiteral("ico"), QStringLiteral("Windows Icon")},
+        {QStringLiteral("mp4"), QStringLiteral("MP4 Video")},
+        {QStringLiteral("mkv"), QStringLiteral("MKV Video")},
+        {QStringLiteral("mov"), QStringLiteral("MOV Video")},
+        {QStringLiteral("avi"), QStringLiteral("AVI Video")},
+        {QStringLiteral("webm"), QStringLiteral("WebM Video")},
+        {QStringLiteral("wmv"), QStringLiteral("WMV Video")},
+        {QStringLiteral("m4v"), QStringLiteral("M4V Video")},
+        {QStringLiteral("mp3"), QStringLiteral("MP3 Audio")},
+        {QStringLiteral("flac"), QStringLiteral("FLAC Lossless Audio")},
+        {QStringLiteral("wav"), QStringLiteral("WAV Audio")},
+        {QStringLiteral("m4a"), QStringLiteral("M4A Audio")},
+        {QStringLiteral("aac"), QStringLiteral("AAC Audio")},
+        {QStringLiteral("ogg"), QStringLiteral("OGG Audio")},
+        {QStringLiteral("opus"), QStringLiteral("Opus Audio")},
         {QStringLiteral("exe"), QStringLiteral("Windows Executable")},
         {QStringLiteral("dll"), QStringLiteral("Dynamic Link Library")},
         {QStringLiteral("msi"), QStringLiteral("Windows Installer Package")},
@@ -111,14 +143,7 @@ QString humanReadableFileType(const QString& extLower) {
 }
 
 bool isSourceCodeExtension(const QString& extLower) {
-    return extLower == QStringLiteral("cpp") || extLower == QStringLiteral("h") ||
-           extLower == QStringLiteral("hpp") || extLower == QStringLiteral("c") ||
-           extLower == QStringLiteral("rs") || extLower == QStringLiteral("py") ||
-           extLower == QStringLiteral("js") || extLower == QStringLiteral("ts") ||
-           extLower == QStringLiteral("json") || extLower == QStringLiteral("sql") ||
-           extLower == QStringLiteral("yaml") || extLower == QStringLiteral("yml") ||
-           extLower == QStringLiteral("xml") || extLower == QStringLiteral("html") ||
-           extLower == QStringLiteral("css");
+    return extraction::DocumentExtractor::isCodeExtension(extLower);
 }
 
 QString sectionCategoryName(const search::FileSearchResult& item) {

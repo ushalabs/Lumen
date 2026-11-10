@@ -135,7 +135,7 @@ public:
 
     // Phase 3 Semantic Chunk Indexing operations
     QVector<SemanticExtractionCandidate> queryCandidatesForSemanticIndexing(
-        int maxTotalSemanticFiles = 2000) const;
+        int maxTotalSemanticFiles = 5000) const;
 
     bool replaceDocumentChunksBatch(const QVector<qint64>& fileIdsToClear,
                                     const QVector<DocumentChunkRecord>& records,

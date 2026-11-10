@@ -64,6 +64,7 @@ set(LUMEN_LIB_SOURCES
     src/extraction/DeflateCodec.cpp
     src/extraction/DocumentExtractor.h
     src/extraction/DocumentExtractor.cpp
+    src/extraction/EnterpriseExtractors.cpp
     src/semantic/WordPieceTokenizer.h
     src/semantic/WordPieceTokenizer.cpp
     src/semantic/DocumentChunker.h

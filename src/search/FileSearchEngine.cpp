@@ -295,18 +295,30 @@ QString FileSearchEngine::parseInlineQueryAndFilters(const QString& rawQuery,
             const QString t = part.mid(5).trimmed().toLower();
             if (t == QStringLiteral("doc") || t == QStringLiteral("docs") || t == QStringLiteral("document")) {
                 active.extensions.append({QStringLiteral("pdf"), QStringLiteral("docx"), QStringLiteral("doc"),
-                                          QStringLiteral("txt"), QStringLiteral("md"), QStringLiteral("rtf")});
-            } else if (t == QStringLiteral("code")) {
-                active.extensions.append({QStringLiteral("cpp"), QStringLiteral("h"), QStringLiteral("hpp"),
-                                          QStringLiteral("c"), QStringLiteral("py"), QStringLiteral("js"),
-                                          QStringLiteral("ts"), QStringLiteral("json"), QStringLiteral("rs"),
-                                          QStringLiteral("go"), QStringLiteral("cs")});
-            } else if (t == QStringLiteral("image") || t == QStringLiteral("img")) {
-                active.extensions.append({QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("jpeg"),
-                                          QStringLiteral("svg"), QStringLiteral("webp"), QStringLiteral("bmp"),
-                                          QStringLiteral("ico"), QStringLiteral("gif")});
-            } else if (t == QStringLiteral("sheet") || t == QStringLiteral("spreadsheet")) {
-                active.extensions.append({QStringLiteral("xlsx"), QStringLiteral("xls"), QStringLiteral("csv")});
+                                          QStringLiteral("rtf"), QStringLiteral("pptx")});
+                active.extensions.append(extraction::DocumentExtractor::textDocumentExtensions());
+            } else if (t == QStringLiteral("code") || t == QStringLiteral("src") || t == QStringLiteral("dev")) {
+                active.extensions.append(extraction::DocumentExtractor::codeExtensions());
+            } else if (t == QStringLiteral("image") || t == QStringLiteral("img") ||
+                       t == QStringLiteral("photo") || t == QStringLiteral("photos") ||
+                       t == QStringLiteral("pic") || t == QStringLiteral("pics")) {
+                active.extensions.append(extraction::DocumentExtractor::imageExtensions());
+            } else if (t == QStringLiteral("video") || t == QStringLiteral("vid") ||
+                       t == QStringLiteral("videos") || t == QStringLiteral("movie") ||
+                       t == QStringLiteral("movies")) {
+                active.extensions.append(extraction::DocumentExtractor::videoExtensions());
+            } else if (t == QStringLiteral("music") || t == QStringLiteral("audio") ||
+                       t == QStringLiteral("song") || t == QStringLiteral("songs") ||
+                       t == QStringLiteral("sound")) {
+                active.extensions.append(extraction::DocumentExtractor::audioExtensions());
+            } else if (t == QStringLiteral("media")) {
+                active.extensions.append(extraction::DocumentExtractor::imageExtensions());
+                active.extensions.append(extraction::DocumentExtractor::videoExtensions());
+                active.extensions.append(extraction::DocumentExtractor::audioExtensions());
+            } else if (t == QStringLiteral("sheet") || t == QStringLiteral("spreadsheet") ||
+                       t == QStringLiteral("sheets") || t == QStringLiteral("excel")) {
+                active.extensions.append(extraction::DocumentExtractor::spreadsheetExtensions());
+                active.extensions.append(QStringLiteral("xls"));
             }
             continue;
         }

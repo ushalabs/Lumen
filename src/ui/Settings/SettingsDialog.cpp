@@ -147,7 +147,7 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     mainLayout->addWidget(createSectionHeader(QStringLiteral("Search & Indexing"), this));
 
     m_enableContentCheck = new QCheckBox(
-        QStringLiteral("Index document text (.txt, .md, .pdf, .docx)"), this);
+        QStringLiteral("Index text, code, spreadsheets & media metadata"), this);
     m_enableContentCheck->setFont(ThemeTokens::makeFont(13, QFont::Normal));
     mainLayout->addWidget(m_enableContentCheck);
 

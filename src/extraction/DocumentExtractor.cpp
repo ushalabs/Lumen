@@ -230,12 +230,6 @@ QString parsePdfContentStreamText(const QByteArray& streamData) {
 
 } // namespace
 
-bool DocumentExtractor::isSupportedExtension(const QString& extensionLower) {
-    return extensionLower == QStringLiteral("txt") ||
-           extensionLower == QStringLiteral("md") ||
-           extensionLower == QStringLiteral("pdf") ||
-           extensionLower == QStringLiteral("docx");
-}
 
 QString DocumentExtractor::normalizeDocumentText(const QString& input, int maxChars) {
     if (input.isEmpty()) {
@@ -298,16 +292,24 @@ ExtractedDocument DocumentExtractor::extractFromFile(const QString& filePath, qi
         doc.errorReason = QStringLiteral("File is empty.");
         return doc;
     }
-    if (fileSize > maxFileSizeBytes) {
-        doc.errorReason = QStringLiteral("File size (%1 bytes) exceeds limit (%2 bytes).")
-                              .arg(fileSize)
-                              .arg(maxFileSizeBytes);
-        return doc;
-    }
 
     const QString ext = fi.suffix().toLower();
     if (!isSupportedExtension(ext)) {
         doc.errorReason = QStringLiteral("Unsupported document extension: %1").arg(ext);
+        return doc;
+    }
+
+    // Media files (video/image/audio) may be multi-GB; inspect headers & Windows properties without reading payloads.
+    if (isMediaMetadataExtension(ext)) {
+        doc = extractMediaMetadataFromFile(filePath, ext, fileSize);
+        doc.extractionTimeMs = static_cast<double>(timer.nsecsElapsed()) / 1e6;
+        return doc;
+    }
+
+    if (fileSize > maxFileSizeBytes) {
+        doc.errorReason = QStringLiteral("File size (%1 bytes) exceeds limit (%2 bytes).")
+                              .arg(fileSize)
+                              .arg(maxFileSizeBytes);
         return doc;
     }
 
@@ -320,12 +322,19 @@ ExtractedDocument DocumentExtractor::extractFromFile(const QString& filePath, qi
     const QByteArray rawBytes = file.readAll();
     file.close();
 
-    if (ext == QStringLiteral("txt") || ext == QStringLiteral("md")) {
+    if (isTextDocumentExtension(ext)) {
         doc = extractTxtOrMarkdown(rawBytes);
     } else if (ext == QStringLiteral("docx")) {
         doc = extractDocxBytes(rawBytes);
     } else if (ext == QStringLiteral("pdf")) {
         doc = extractPdfBytes(rawBytes);
+    } else if (ext == QStringLiteral("xlsx") || ext == QStringLiteral("xlsm")) {
+        doc = extractXlsxBytes(rawBytes);
+    } else if (ext == QStringLiteral("csv") || ext == QStringLiteral("tsv")) {
+        const QChar delim = (ext == QStringLiteral("tsv")) ? QLatin1Char('\t') : QLatin1Char(',');
+        doc = extractDelimitedTableBytes(rawBytes, delim);
+    } else if (isCodeExtension(ext)) {
+        doc = extractCodeBytes(rawBytes, fi.fileName(), ext);
     }
 
     doc.extractionTimeMs = static_cast<double>(timer.nsecsElapsed()) / 1e6;
