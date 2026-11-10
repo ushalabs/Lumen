@@ -15,6 +15,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QStringList>
+#include <QThreadPool>
 #include <QTimer>
 
 int main(int argc, char* argv[]) {
@@ -86,7 +87,7 @@ int main(int argc, char* argv[]) {
             }
             if (auto* bar = lumenApp.desktopSearchBar()) {
                 const QString origTheme = lumen::core::SettingsManager::instance().appearancePreference();
-                lumen::core::SettingsManager::instance().setAppearancePreference(QStringLiteral("light"), false);
+                lumen::core::SettingsManager::instance().setAppearancePreference(QStringLiteral("dark"), false);
                 bar->refreshAppearanceFromSettings();
 
                 bar->show();
@@ -165,9 +166,17 @@ int main(int argc, char* argv[]) {
 
                     if (bar->popupWidget()) {
                         bar->popupWidget()->selectNext();
-                        QCoreApplication::processEvents();
+                        QElapsedTimer waitTimer;
+                        waitTimer.start();
+                        while (waitTimer.elapsed() < 80) {
+                            QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+                        }
                         bar->grab().save(dir.filePath(QStringLiteral("selected_result_state.png")));
                         bar->popupWidget()->selectPrevious();
+                        waitTimer.restart();
+                        while (waitTimer.elapsed() < 60) {
+                            QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+                        }
                     }
 
                     bar->setSearchText(QStringLiteral("enterprise licensing"));
@@ -183,8 +192,10 @@ int main(int argc, char* argv[]) {
                             const QPixmap semGrab = bar->grab();
                             semGrab.save(dir.filePath(QStringLiteral("semantic_search.png")));
                             semGrab.save(dir.filePath(QStringLiteral("phase3_semantic_search_results.png")));
+                            semGrab.save(dir.filePath(QStringLiteral("dark_theme_search.png")));
 
                             if (bar->popupWidget()) {
+                                bar->popupWidget()->setSearchMode(lumen::search::SearchMode::Semantic);
                                 bar->popupWidget()->setPreviewVisible(true);
                             }
                             QTimer::singleShot(180, &qApp[0], [bar, dir, origTheme]() {
@@ -193,18 +204,6 @@ int main(int argc, char* argv[]) {
                                 prevGrab.save(dir.filePath(QStringLiteral("quick_preview_and_modes.png")));
                                 prevGrab.save(dir.filePath(QStringLiteral("phase4_quick_preview_and_modes.png")));
 
-                                // Capture Dark Theme search state
-                                if (bar->popupWidget()) {
-                                    bar->popupWidget()->setPreviewVisible(false);
-                                }
-                                lumen::core::SettingsManager::instance().setAppearancePreference(QStringLiteral("dark"), false);
-                                bar->refreshAppearanceFromSettings();
-                                QCoreApplication::processEvents();
-                                bar->grab().save(dir.filePath(QStringLiteral("dark_theme_search.png")));
-
-                                // Restore Light theme and capture SettingsDialog
-                                lumen::core::SettingsManager::instance().setAppearancePreference(QStringLiteral("light"), false);
-                                bar->refreshAppearanceFromSettings();
                                 bar->collapsePopupAndDeactivate(true);
 
                                 lumen::ui::SettingsDialog settingsDlg;

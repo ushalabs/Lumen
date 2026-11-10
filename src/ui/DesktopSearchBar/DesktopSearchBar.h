@@ -18,14 +18,14 @@ class DesktopSearchBar : public QWidget {
     Q_OBJECT
 
 public:
-    static constexpr int kBarWidth = 460;
-    static constexpr int kBarHeight = 52;
-    static constexpr int kPopupWidth = 620;
-    static constexpr int kPopupGap = 6;
-    static constexpr int kPopupHeight = 132;
+    static constexpr int kBarWidth = 540;
+    static constexpr int kBarHeight = 56;
+    static constexpr int kPopupWidth = 920;
+    static constexpr int kPopupGap = 0;
+    static constexpr int kPopupHeight = 140;
     static constexpr int kExpandedHeight = kBarHeight + kPopupGap + kPopupHeight;
     static constexpr int kRightEdgeMargin = 30;
-    static constexpr int kTopWorkAreaOffset = 100;
+    static constexpr int kTopWorkAreaOffset = 88;
 
     explicit DesktopSearchBar(QWidget* parent = nullptr);
     ~DesktopSearchBar() override;
@@ -88,11 +88,11 @@ private:
     void updateSearchInputGeometry();
     void dispatchAsyncSearch(const QString& trimmedQuery);
     void dispatchRelatedDocumentsSearch(const search::FileSearchResult& sourceResult);
-    void updatePreviewForResult(const search::FileSearchResult& result);
+    void dispatchInspectorPreviewFetch(const search::FileSearchResult& result);
     void applyRestingWindowZOrder();
     void bindScreenSignals();
-    QRectF barShellRect() const;
     QRectF clearButtonHitRect() const;
+    QRectF escButtonHitRect() const;
 
     QLineEdit* m_searchEdit = nullptr;
     SearchPopupWidget* m_popupWidget = nullptr;
@@ -101,6 +101,7 @@ private:
     search::FileSearchEngine m_searchEngine;
     std::shared_ptr<std::atomic_bool> m_activeCancelToken;
     quint64 m_queryGeneration = 0;
+    quint64 m_previewGeneration = 0;
 
     bool m_popupExpanded = false;
     bool m_isSearchActive = false;
@@ -112,7 +113,7 @@ private:
     QPoint m_collapsedAnchorPos;
     int m_expandedXShift = 0;
 
-    bool m_darkTheme = false;
+    bool m_darkTheme = true;
     bool m_hotkeyRegistered = false;
     bool m_openFilesWithShell = true;
     QString m_hotkeyError;

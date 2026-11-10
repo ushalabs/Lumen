@@ -78,7 +78,7 @@ void SettingsManager::resetToDefaultsUnlocked() {
     m_hasCustomPosition = false;
     m_desktopBarPos = QPoint(0, 0);
     m_startWithWindows = false;
-    m_appearancePreference = QStringLiteral("light");
+    m_appearancePreference = QStringLiteral("dark");
     m_globalShortcut = QStringLiteral("Ctrl+Alt+Space");
 
     m_indexing.watchedFolders = AppPaths::defaultWatchedFolders();
@@ -133,7 +133,7 @@ bool SettingsManager::load(const QString& filePath) {
     }
 
     m_startWithWindows = root.value(QStringLiteral("startWithWindows")).toBool(false);
-    m_appearancePreference = root.value(QStringLiteral("appearancePreference")).toString(QStringLiteral("light"));
+    m_appearancePreference = root.value(QStringLiteral("appearancePreference")).toString(QStringLiteral("dark"));
     m_globalShortcut = root.value(QStringLiteral("globalShortcut")).toString(QStringLiteral("Ctrl+Alt+Space"));
 
     if (root.contains(QStringLiteral("pinnedFiles")) && root.value(QStringLiteral("pinnedFiles")).isArray()) {

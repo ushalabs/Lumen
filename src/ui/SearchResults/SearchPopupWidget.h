@@ -17,6 +17,7 @@ class SearchResultListModel : public QAbstractListModel {
 public:
     enum Roles {
         FileNameRole = Qt::UserRole + 1,
+        FullPathRole,
         ParentDirRole,
         ExtensionRole,
         SizeRole,
@@ -26,7 +27,10 @@ public:
         SnippetRole,
         MatchedPageRole,
         MatchTypeRole,
-        IsPinnedRole
+        SemanticSimilarityRole,
+        IsPinnedRole,
+        GroupHeaderTitleRole,
+        GroupHeaderCountRole
     };
 
     explicit SearchResultListModel(QObject* parent = nullptr);
@@ -42,6 +46,8 @@ public:
 
 private:
     QVector<search::FileSearchResult> m_results;
+    QVector<QString> m_groupTitles;
+    QVector<int> m_groupCounts;
 };
 
 class SearchResultItemDelegate;
@@ -50,11 +56,13 @@ class SearchPopupWidget : public QWidget {
     Q_OBJECT
 
 public:
-    static constexpr int kHeaderHeight = 36;
-    static constexpr int kRowHeight = 60;
+    static constexpr int kHeaderHeight = 44;
+    static constexpr int kGroupHeaderExtraHeight = 24;
+    static constexpr int kRowHeight = 62;
     static constexpr int kContentRowHeight = 76;
-    static constexpr int kPreviewHeight = 148;
-    static constexpr int kFooterHeight = 28;
+    static constexpr int kSplitBodyMinHeight = 420;
+    static constexpr int kPreviewHeight = 48;
+    static constexpr int kFooterHeight = 34;
     static constexpr int kMaxVisibleRows = 6;
 
     explicit SearchPopupWidget(QWidget* parent = nullptr);
@@ -116,10 +124,15 @@ protected:
 private:
     void updateListLayout();
     void showContextMenuAt(const QPoint& localPos, const search::FileSearchResult& item);
+    int leftPaneWidth() const noexcept;
     QRectF modePillRect(int modeIndex) const;
-    QRectF previewToggleRect() const;
-    QRectF previewOpenButtonRect(const QRectF& previewPaneRect) const;
-    QRectF previewRevealButtonRect(const QRectF& previewPaneRect) const;
+    QRectF backButtonRect() const;
+    QRectF inspectorPaneRect() const;
+    QRectF inspectorCopyPathButtonRect(const QRectF& inspRect) const;
+    QRectF inspectorOpenButtonRect(const QRectF& inspRect) const;
+    QRectF inspectorRevealButtonRect(const QRectF& inspRect) const;
+    QRectF inspectorRelatedButtonRect(const QRectF& inspRect) const;
+    QRectF inspectorPinButtonRect(const QRectF& inspRect) const;
 
     QString m_queryText;
     QString m_previewText;
@@ -127,7 +140,7 @@ private:
     double m_lastQueryMs = 0.0;
     search::SearchMode m_searchMode = search::SearchMode::All;
     bool m_previewVisible = false;
-    bool m_darkTheme = false;
+    bool m_darkTheme = true;
     bool m_indexingInProgress = false;
 
     SearchResultListModel* m_model = nullptr;

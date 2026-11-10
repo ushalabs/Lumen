@@ -7,7 +7,7 @@
 namespace lumen::ui {
 
 struct ThemeTokens {
-    // Primary brand identity (Downshift Pink/Magenta)
+    // Primary brand identity (Lumen / Downshift Pink #EC1680 + Gemini Rose/Pink accents)
     QColor brandPink;
     QColor brandPinkHover;
     QColor brandPinkLight;
@@ -20,10 +20,12 @@ struct ThemeTokens {
     QColor textSecondary;
     QColor textMuted;
 
-    // Surfaces & structure
+    // Surfaces & structure (Gemini deep charcoal/plum & near-black interior panels)
     QColor surfaceBackground;
     QColor elevatedBackground;
     QColor windowBackground;
+    QColor inspectorBackground;
+    QColor codeBoxBackground;
     QColor hoverSurface;
     QColor borderColor;
     QColor borderSubtle;
@@ -38,7 +40,7 @@ struct ThemeTokens {
     QColor iconAccentCode;
     QColor iconAccentImage;
 
-    // Legacy compatibility tokens (kept restrained)
+    // Badge styling
     QColor badgePdfBg;
     QColor badgePdfText;
     QColor badgeDocBg;
@@ -60,8 +62,11 @@ struct ThemeTokens {
 
     static ThemeTokens get(bool dark);
 
-    // Creates a native Windows font preferring Segoe UI Variable with pixel sizing
+    // Creates a native Windows UI font (Segoe UI Variable / Segoe UI) with pixel sizing
     static QFont makeFont(int pixelSize, QFont::Weight weight = QFont::Normal, bool display = false);
+
+    // Creates a native Windows monospaced font (Cascadia Mono / Consolas) with pixel sizing
+    static QFont makeMonoFont(int pixelSize, QFont::Weight weight = QFont::Normal);
 };
 
 } // namespace lumen::ui

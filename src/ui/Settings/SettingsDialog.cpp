@@ -148,8 +148,8 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     mainLayout->addWidget(createSectionHeader(QStringLiteral("Appearance"), this));
 
     m_appearanceCombo = new QComboBox(this);
+    m_appearanceCombo->addItem(QStringLiteral("Dark (Default)"), QStringLiteral("dark"));
     m_appearanceCombo->addItem(QStringLiteral("Light"), QStringLiteral("light"));
-    m_appearanceCombo->addItem(QStringLiteral("Dark"), QStringLiteral("dark"));
     m_appearanceCombo->addItem(QStringLiteral("System Default"), QStringLiteral("system"));
     m_appearanceCombo->setFixedWidth(180);
     m_appearanceCombo->setFont(ThemeTokens::makeFont(13, QFont::Normal));
@@ -330,9 +330,9 @@ void SettingsDialog::applyThemeStyles(bool dark) {
 
 void SettingsDialog::onAppearanceChanged() {
     const QString pref = m_appearanceCombo->currentData().toString().toLower();
-    bool dark = false;
-    if (pref == QStringLiteral("dark")) {
-        dark = true;
+    bool dark = true;
+    if (pref == QStringLiteral("light")) {
+        dark = false;
     } else if (pref == QStringLiteral("system")) {
         dark = (QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark);
     }

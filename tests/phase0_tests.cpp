@@ -69,9 +69,9 @@ private slots:
         QCOMPARE(settings.desktopBarPosition(), customPos);
         QCOMPARE(settings.appearancePreference(), QStringLiteral("dark"));
 
-        // Reset back to light default for subsequent UI tests
+        // Reset back to dark default for subsequent UI tests
         settings.resetDesktopBarPosition(false);
-        settings.setAppearancePreference(QStringLiteral("light"), true);
+        settings.setAppearancePreference(QStringLiteral("dark"), true);
     }
 
     void testSingleInstanceEnforcement() {

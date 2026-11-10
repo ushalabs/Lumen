@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lumen — Offline Windows Desktop Search Experience</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Phosphor Icons -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <!-- Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'Segoe UI Variable', 'Segoe UI', '-apple-system', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Cascadia Code', 'Consolas', 'monospace'],
+          },
+          boxShadow: {
+            'lumen-pill': '0 8px 32px 0 rgba(255, 51, 119, 0.22), 0 0 0 1px rgba(255, 105, 180, 0.28)',
+            'lumen-modal': '0 25px 80px -15px rgba(255, 20, 147, 0.35), 0 0 0 1px rgba(255, 105, 180, 0.32), 0 0 40px -10px rgba(255, 51, 119, 0.2)',
+            'pink-glow': '0 0 20px rgba(255, 51, 119, 0.45)'
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Windows 11 Acrylic & Mica simulation */
+    .mica-surface {
+      backdrop-filter: blur(48px) saturate(210%);
+      -webkit-backdrop-filter: blur(48px) saturate(210%);
+    }
+
+    /* Pink Color Theme Presets */
+    body.theme-cyber {
+      --lumen-accent: #ff3377;
+      --lumen-glow: rgba(255, 51, 119, 0.4);
+      --lumen-border: rgba(255, 51, 119, 0.32);
+      --lumen-subtle: rgba(255, 51, 119, 0.12);
+      --lumen-highlight: rgba(255, 51, 119, 0.22);
+    }
+    body.theme-sakura {
+      --lumen-accent: #f472b6;
+      --lumen-glow: rgba(244, 114, 182, 0.35);
+      --lumen-border: rgba(244, 114, 182, 0.30);
+      --lumen-subtle: rgba(244, 114, 182, 0.12);
+      --lumen-highlight: rgba(244, 114, 182, 0.20);
+    }
+    body.theme-vapor {
+      --lumen-accent: #ff1493;
+      --lumen-glow: rgba(255, 20, 147, 0.45);
+      --lumen-border: rgba(255, 20, 147, 0.35);
+      --lumen-subtle: rgba(255, 20, 147, 0.14);
+      --lumen-highlight: rgba(255, 20, 147, 0.24);
+    }
+
+    .themed-border { border-color: var(--lumen-border); }
+    .themed-highlight {
+      background-color: var(--lumen-highlight);
+      border-left: 3px solid var(--lumen-accent);
+    }
+
+    /* Morphing Animation */
+    .morph-container {
+      transition: width 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+                  max-width 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+                  border-radius 0.28s ease,
+                  box-shadow 0.3s ease,
+                  transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .results-expand {
+      transition: max-height 0.34s cubic-bezier(0.16, 1, 0.3, 1),
+                  opacity 0.26s ease,
+                  transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* Subtle custom scrollbar */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: rgba(0,0,0,0.15); }
+    ::-webkit-scrollbar-thumb { background: rgba(255, 105, 180, 0.25); border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--lumen-accent); }
+  </style>
+</head>
+<body class="theme-cyber bg-[#07050a] text-slate-100 font-sans h-screen w-screen overflow-hidden select-none relative flex flex-col justify-between">
+  <!-- Visual reference archived from Gemini design specification -->
+</body>
+</html>
