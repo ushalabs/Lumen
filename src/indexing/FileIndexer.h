@@ -1,7 +1,9 @@
 #pragma once
 
 #include "indexing/DirectoryWatcher.h"
+#include "indexing/IndexingPolicy.h"
 
+#include <QHash>
 #include <QObject>
 #include <QSet>
 #include <QString>
@@ -42,13 +44,16 @@ public:
     explicit FileIndexer(QObject* parent = nullptr);
     ~FileIndexer() override;
 
-    // Starts background enumeration, content extraction, optional semantic indexing, and ReadDirectoryChangesW monitoring.
+    // Starts background enumeration, content extraction, optional semantic indexing, and IOCP monitoring.
+    // When indexWholePc is true, watchedRoots defines the Content & Semantic AI scope while fixed PC drives
+    // and Start Menu shortcuts define the lightweight filename & folder catalog.
     void startBackgroundIndexing(const QStringList& watchedRoots,
                                  const QStringList& ignoredDirNames,
                                  bool extractContent = true,
                                  int maxContentFiles = kDefaultMaxContentFiles,
                                  qint64 maxDocumentBytes = kDefaultMaxDocumentBytes,
-                                 bool enableSemanticIndexing = false);
+                                 bool enableSemanticIndexing = false,
+                                 bool indexWholePc = false);
 
     void stop();
 
@@ -58,7 +63,8 @@ public:
 
     // Runs filename enumeration & reconciliation pass directly.
     IndexingStatistics runScanAndReconcile(const QStringList& watchedRoots,
-                                           const QStringList& ignoredDirNames);
+                                           const QStringList& ignoredDirNames,
+                                           bool wholePcMode = false);
 
     // Runs bounded background document content extraction pass on eligible .txt/.md/.pdf/.docx files.
     qint64 runContentExtractionPass(int maxContentFiles = kDefaultMaxContentFiles,
@@ -88,12 +94,25 @@ signals:
 
 private slots:
     void onWatcherEvents(const QVector<lumen::indexing::FileChangeEvent>& events);
+    void onDirectorySubtreeAdded(const QString& directoryPath);
     void onWatcherOverflowRescan(const QString& rootDirectory);
 
 private:
+    IndexingStatistics runScanAndReconcileImpl(const QStringList& watchedRoots,
+                                               const QStringList& ignoredDirNames,
+                                               bool wholePcMode);
     void reconcileDirectorySubtree(const QString& dirPath,
                                    qint64 maxDocumentBytes,
                                    bool* outHasEligibleDocChange);
+    void scanSubtreeBounded(const QString& rootDir,
+                            qint64 volumeUsn,
+                            const QSet<QString>& ignoredSet,
+                            bool wholePcMode,
+                            int splitDepth,
+                            IndexingStatistics* stats,
+                            bool* outHasEligibleDocChange,
+                            qint64 maxDocumentBytes);
+    bool isEligibleContentCandidatePath(const QString& cleanPath) const;
 
     DirectoryWatcher m_watcher;
     std::thread m_workerThread;
@@ -102,8 +121,13 @@ private:
     std::atomic_bool m_paused{false};
     std::atomic_bool m_scanning{false};
     QSet<QString> m_ignoredLower;
+    QStringList m_contentSemanticRoots;
+    bool m_wholePcMode = false;
+    bool m_restrictContentToRoots = false;
     bool m_incrementalContentEnabled = true;
+    int m_incrementalMaxContentFiles = kDefaultMaxContentFiles;
     qint64 m_incrementalMaxDocBytes = kDefaultMaxDocumentBytes;
+    QHash<QString, qint64> m_lastOverflowMsByRoot;
 };
 
 } // namespace lumen::indexing

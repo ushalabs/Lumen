@@ -146,17 +146,22 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     // -------------------------------------------------------------------------
     mainLayout->addWidget(createSectionHeader(QStringLiteral("Search & Indexing"), this));
 
+    m_indexWholePcCheck = new QCheckBox(
+        QStringLiteral("Index files && folders across all PC drives (skips OS && cache junk)"), this);
+    m_indexWholePcCheck->setFont(ThemeTokens::makeFont(13, QFont::Normal));
+    mainLayout->addWidget(m_indexWholePcCheck);
+
     m_enableContentCheck = new QCheckBox(
-        QStringLiteral("Index text, code, spreadsheets && media metadata"), this);
+        QStringLiteral("Index text, code, spreadsheets && media metadata in selected folders"), this);
     m_enableContentCheck->setFont(ThemeTokens::makeFont(13, QFont::Normal));
     mainLayout->addWidget(m_enableContentCheck);
 
     m_enableSemanticCheck = new QCheckBox(
-        QStringLiteral("Enable offline semantic search (local MiniLM-L6-v2 embeddings)"), this);
+        QStringLiteral("Enable offline semantic search (MiniLM-L6-v2) in selected folders"), this);
     m_enableSemanticCheck->setFont(ThemeTokens::makeFont(13, QFont::Normal));
     mainLayout->addWidget(m_enableSemanticCheck);
 
-    auto* scopeCaption = new QLabel(QStringLiteral("Indexed folders"), this);
+    auto* scopeCaption = new QLabel(QStringLiteral("Content & Semantic AI folders"), this);
     scopeCaption->setObjectName(QStringLiteral("subCaption"));
     scopeCaption->setFont(ThemeTokens::makeFont(12, QFont::Medium));
     mainLayout->addWidget(scopeCaption);
@@ -250,7 +255,7 @@ void SettingsDialog::showEvent(QShowEvent* event) {
 void SettingsDialog::applyThemeStyles() {
     const auto theme = ThemeTokens::get(false);
 
-    for (auto* cb : {m_desktopBarVisibleCheck, m_alwaysOnTopCheck, m_startWithWindowsCheck, m_enableContentCheck, m_enableSemanticCheck}) {
+    for (auto* cb : {m_desktopBarVisibleCheck, m_alwaysOnTopCheck, m_startWithWindowsCheck, m_indexWholePcCheck, m_enableContentCheck, m_enableSemanticCheck}) {
         if (cb != nullptr) {
             cb->setStyle(new LumenSettingsStyle());
         }
@@ -322,6 +327,7 @@ void SettingsDialog::loadFromSettings() {
     m_shortcutEdit->setText(settings.globalShortcut());
 
     const auto idxSettings = settings.indexingSettings();
+    m_indexWholePcCheck->setChecked(idxSettings.indexWholePc);
     m_enableContentCheck->setChecked(idxSettings.enableContentIndexing);
     m_enableSemanticCheck->setChecked(idxSettings.enableSemanticIndexing);
 
@@ -337,9 +343,10 @@ void SettingsDialog::loadFromSettings() {
 void SettingsDialog::refreshDbStatusLabel() {
     auto& db = database::DatabaseManager::instance();
     m_dbStatusLabel->setText(
-        QStringLiteral("%1 indexed files   ·   %2 content documents")
+        QStringLiteral("%1 indexed items   ·   %2 content docs   ·   %3 semantic docs")
             .arg(db.fileCount())
-            .arg(db.documentContentCount()));
+            .arg(db.documentContentCount())
+            .arg(db.semanticEmbeddedFileCount()));
     m_dbPathLabel->setText(
         QStringLiteral("Index location: %1")
             .arg(QDir::toNativeSeparators(core::AppPaths::databaseFilePath())));
@@ -392,6 +399,7 @@ void SettingsDialog::onSaveClicked() {
     }
 
     auto idx = settings.indexingSettings();
+    idx.indexWholePc = m_indexWholePcCheck->isChecked();
     idx.enableContentIndexing = m_enableContentCheck->isChecked();
     idx.enableSemanticIndexing = m_enableSemanticCheck->isChecked();
     QStringList folders;

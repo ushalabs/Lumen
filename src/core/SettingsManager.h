@@ -12,6 +12,7 @@ struct IndexingSettingsPlaceholder {
     QStringList ignoredDirectories;
     int maxDocumentSizeMb = 10;
     int maxContentIndexedFiles = 5000;
+    bool indexWholePc = true;
     bool enableContentIndexing = true;
     bool enableSemanticIndexing = true;
     bool indexingPaused = false;

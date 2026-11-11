@@ -1,5 +1,7 @@
 #pragma once
 
+#include "indexing/IndexingPolicy.h"
+
 #include <QObject>
 #include <QSet>
 #include <QString>
@@ -34,21 +36,26 @@ public:
     explicit DirectoryWatcher(QObject* parent = nullptr);
     ~DirectoryWatcher() override;
 
-    void startWatching(const QStringList& rootDirectories, const QStringList& ignoredDirNames);
+    void startWatching(const QStringList& rootDirectories,
+                       const QStringList& ignoredDirNames,
+                       bool wholePcMode = false);
+    void startWatching(const QVector<WatchTarget>& targets,
+                       const QStringList& ignoredDirNames,
+                       bool wholePcMode = true);
     void stopWatching();
 
     bool isWatching() const noexcept { return m_running.load(std::memory_order_relaxed); }
 
 signals:
     void fileChangesDetected(const QVector<lumen::indexing::FileChangeEvent>& events);
+    void directorySubtreeAdded(const QString& directoryPath);
     void watcherOverflowRescanNeeded(const QString& rootDirectory);
 
 private:
-    void watcherThreadMain(QStringList roots, QSet<QString> ignoredLower);
-    static bool containsIgnoredSegment(const QString& relativeOrFullPath, const QSet<QString>& ignoredLower);
+    void watcherThreadMain(QVector<WatchTarget> targets, QSet<QString> ignoredLower, bool wholePcMode);
 
     std::atomic_bool m_running{false};
-    HANDLE m_stopEvent = nullptr;
+    HANDLE m_iocpHandle = nullptr;
     std::thread m_thread;
 };
 

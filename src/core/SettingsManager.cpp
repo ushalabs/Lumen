@@ -126,9 +126,6 @@ SettingsManager::SettingsManager() {
 
 QStringList SettingsManager::defaultIgnoredDirectories() {
     return {
-        QStringLiteral("Windows"),
-        QStringLiteral("Program Files"),
-        QStringLiteral("Program Files (x86)"),
         QStringLiteral("AppData"),
         QStringLiteral(".git"),
         QStringLiteral("node_modules"),
@@ -156,6 +153,7 @@ void SettingsManager::resetToDefaultsUnlocked() {
     m_indexing.ignoredDirectories = defaultIgnoredDirectories();
     m_indexing.maxDocumentSizeMb = 10;
     m_indexing.maxContentIndexedFiles = 5000;
+    m_indexing.indexWholePc = true;
     m_indexing.enableContentIndexing = true;
     m_indexing.enableSemanticIndexing = true;
     m_indexing.indexingPaused = false;
@@ -264,9 +262,28 @@ bool SettingsManager::load(const QString& filePath) {
 
         m_indexing.maxDocumentSizeMb = idxObj.value(QStringLiteral("maxDocumentSizeMb")).toInt(10);
         m_indexing.maxContentIndexedFiles = idxObj.value(QStringLiteral("maxContentIndexedFiles")).toInt(5000);
+        m_indexing.indexWholePc = idxObj.value(QStringLiteral("indexWholePc")).toBool(true);
         m_indexing.enableContentIndexing = idxObj.value(QStringLiteral("enableContentIndexing")).toBool(true);
         m_indexing.enableSemanticIndexing = idxObj.value(QStringLiteral("enableSemanticIndexing")).toBool(true);
         m_indexing.indexingPaused = idxObj.value(QStringLiteral("indexingPaused")).toBool(false);
+    }
+
+    const int loadedSchemaVersion = root.value(QStringLiteral("schemaVersion")).toInt(1);
+    if (loadedSchemaVersion < 3) {
+        // Migrate legacy default blacklists so C:\Program Files and C:\Program Files (x86) are searchable
+        // while OS junk (C:\Windows) is excluded cleanly at the drive root by IndexingPolicy.
+        QStringList cleanedIgnored;
+        cleanedIgnored.reserve(m_indexing.ignoredDirectories.size());
+        for (const QString& dirName : m_indexing.ignoredDirectories) {
+            if (dirName.compare(QStringLiteral("Program Files"), Qt::CaseInsensitive) == 0 ||
+                dirName.compare(QStringLiteral("Program Files (x86)"), Qt::CaseInsensitive) == 0 ||
+                dirName.compare(QStringLiteral("Windows"), Qt::CaseInsensitive) == 0) {
+                continue;
+            }
+            cleanedIgnored.append(dirName);
+        }
+        m_indexing.ignoredDirectories = cleanedIgnored;
+        m_indexing.indexWholePc = true;
     }
 
     return true;
@@ -301,6 +318,7 @@ bool SettingsManager::save() const {
     idxObj.insert(QStringLiteral("ignoredDirectories"), ignoredArr);
     idxObj.insert(QStringLiteral("maxDocumentSizeMb"), m_indexing.maxDocumentSizeMb);
     idxObj.insert(QStringLiteral("maxContentIndexedFiles"), m_indexing.maxContentIndexedFiles);
+    idxObj.insert(QStringLiteral("indexWholePc"), m_indexing.indexWholePc);
     idxObj.insert(QStringLiteral("enableContentIndexing"), m_indexing.enableContentIndexing);
     idxObj.insert(QStringLiteral("enableSemanticIndexing"), m_indexing.enableSemanticIndexing);
     idxObj.insert(QStringLiteral("indexingPaused"), m_indexing.indexingPaused);
@@ -316,7 +334,7 @@ bool SettingsManager::save() const {
     }
 
     QJsonObject root;
-    root.insert(QStringLiteral("schemaVersion"), 2);
+    root.insert(QStringLiteral("schemaVersion"), 3);
     root.insert(QStringLiteral("desktopBarVisible"), m_desktopBarVisible);
     root.insert(QStringLiteral("alwaysOnTopMode"), m_alwaysOnTopMode);
     root.insert(QStringLiteral("hasCustomPosition"), m_hasCustomPosition);

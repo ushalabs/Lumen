@@ -8,12 +8,14 @@
 #include <chrono>
 #include <limits>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 namespace lumen::indexing {
 
 namespace {
-constexpr DWORD kWatchBufferBytes = 64 * 1024;
+constexpr DWORD kWatchBufferBytes = 128 * 1024;
+constexpr ULONG_PTR kShutdownCompletionKey = static_cast<ULONG_PTR>(-1);
 constexpr auto kRenamePairGraceWindow = std::chrono::milliseconds(50);
 constexpr DWORD kNotifyFilter = FILE_NOTIFY_CHANGE_FILE_NAME |
                                 FILE_NOTIFY_CHANGE_DIR_NAME |
@@ -21,9 +23,10 @@ constexpr DWORD kNotifyFilter = FILE_NOTIFY_CHANGE_FILE_NAME |
                                 FILE_NOTIFY_CHANGE_LAST_WRITE;
 
 struct WatchedRootContext {
+    ULONG_PTR id = 0;
     QString rootPath;
+    bool watchSubtree = true;
     HANDLE dirHandle = INVALID_HANDLE_VALUE;
-    HANDLE ioEvent = nullptr;
     OVERLAPPED overlapped{};
     alignas(DWORD) BYTE buffer[kWatchBufferBytes]{};
     bool pendingIo = false;
@@ -31,15 +34,18 @@ struct WatchedRootContext {
     std::chrono::steady_clock::time_point pendingRenameDeadline{};
 
     ~WatchedRootContext() {
+        closeHandle();
+    }
+
+    void closeHandle() {
         if (dirHandle != INVALID_HANDLE_VALUE && dirHandle != nullptr) {
-            CancelIoEx(dirHandle, &overlapped);
+            if (pendingIo) {
+                CancelIoEx(dirHandle, &overlapped);
+            }
             CloseHandle(dirHandle);
             dirHandle = INVALID_HANDLE_VALUE;
         }
-        if (ioEvent != nullptr) {
-            CloseHandle(ioEvent);
-            ioEvent = nullptr;
-        }
+        pendingIo = false;
     }
 };
 
@@ -58,15 +64,13 @@ bool issueAsyncRead(WatchedRootContext* ctx) {
     if (ctx == nullptr || ctx->dirHandle == INVALID_HANDLE_VALUE) {
         return false;
     }
-    ResetEvent(ctx->ioEvent);
     ctx->overlapped = OVERLAPPED{};
-    ctx->overlapped.hEvent = ctx->ioEvent;
 
     const BOOL ok = ReadDirectoryChangesW(
         ctx->dirHandle,
         ctx->buffer,
         kWatchBufferBytes,
-        TRUE,
+        ctx->watchSubtree ? TRUE : FALSE,
         kNotifyFilter,
         nullptr,
         &ctx->overlapped,
@@ -77,6 +81,24 @@ bool issueAsyncRead(WatchedRootContext* ctx) {
     }
     ctx->pendingIo = true;
     return true;
+}
+
+DWORD computeNextTimeoutMs(const std::unordered_map<ULONG_PTR, std::unique_ptr<WatchedRootContext>>& contexts) {
+    DWORD timeoutMs = INFINITE;
+    const auto now = std::chrono::steady_clock::now();
+    for (const auto& [id, ctxPtr] : contexts) {
+        Q_UNUSED(id);
+        if (!ctxPtr->pendingRenameOldPath.isEmpty()) {
+            if (now >= ctxPtr->pendingRenameDeadline) {
+                return 0;
+            }
+            const auto remMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                ctxPtr->pendingRenameDeadline - now).count();
+            const DWORD clamped = static_cast<DWORD>(std::clamp<long long>(remMs, 1, 100));
+            timeoutMs = (timeoutMs == INFINITE) ? clamped : std::min(timeoutMs, clamped);
+        }
+    }
+    return timeoutMs;
 }
 } // namespace
 
@@ -91,9 +113,21 @@ DirectoryWatcher::~DirectoryWatcher() {
 }
 
 void DirectoryWatcher::startWatching(const QStringList& rootDirectories,
-                                     const QStringList& ignoredDirNames) {
+                                     const QStringList& ignoredDirNames,
+                                     bool wholePcMode) {
+    QVector<WatchTarget> targets;
+    targets.reserve(rootDirectories.size());
+    for (const QString& dir : rootDirectories) {
+        targets.append({dir, true});
+    }
+    startWatching(targets, ignoredDirNames, wholePcMode);
+}
+
+void DirectoryWatcher::startWatching(const QVector<WatchTarget>& targets,
+                                     const QStringList& ignoredDirNames,
+                                     bool wholePcMode) {
     stopWatching();
-    if (rootDirectories.isEmpty()) {
+    if (targets.isEmpty()) {
         return;
     }
 
@@ -102,66 +136,54 @@ void DirectoryWatcher::startWatching(const QStringList& rootDirectories,
         ignoredLower.insert(ig.trimmed().toLower());
     }
 
-    m_stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (m_stopEvent == nullptr) {
+    m_iocpHandle = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 1);
+    if (m_iocpHandle == nullptr) {
         return;
     }
 
     m_running.store(true, std::memory_order_release);
-    m_thread = std::thread(&DirectoryWatcher::watcherThreadMain, this, rootDirectories, ignoredLower);
+    m_thread = std::thread(&DirectoryWatcher::watcherThreadMain, this, targets, ignoredLower, wholePcMode);
 }
 
 void DirectoryWatcher::stopWatching() {
     m_running.store(false, std::memory_order_release);
-    if (m_stopEvent != nullptr) {
-        SetEvent(m_stopEvent);
+    if (m_iocpHandle != nullptr) {
+        PostQueuedCompletionStatus(m_iocpHandle, 0, kShutdownCompletionKey, nullptr);
     }
     if (m_thread.joinable()) {
         m_thread.join();
     }
-    if (m_stopEvent != nullptr) {
-        CloseHandle(m_stopEvent);
-        m_stopEvent = nullptr;
+    if (m_iocpHandle != nullptr) {
+        CloseHandle(m_iocpHandle);
+        m_iocpHandle = nullptr;
     }
 }
 
-bool DirectoryWatcher::containsIgnoredSegment(const QString& relativeOrFullPath,
-                                              const QSet<QString>& ignoredLower) {
-    const QStringList parts = relativeOrFullPath.split(QLatin1Char('\\'), Qt::SkipEmptyParts);
-    for (const QString& part : parts) {
-        const QString lower = part.toLower();
-        if (ignoredLower.contains(lower)) {
-            return true;
-        }
-        if (lower == QStringLiteral(".env") || lower.endsWith(QStringLiteral(".pem")) ||
-            lower.endsWith(QStringLiteral(".key")) || lower == QStringLiteral("id_rsa")) {
-            return true;
-        }
-    }
-    return false;
-}
-
-void DirectoryWatcher::watcherThreadMain(QStringList roots, QSet<QString> ignoredLower) {
+void DirectoryWatcher::watcherThreadMain(QVector<WatchTarget> targets,
+                                         QSet<QString> ignoredLower,
+                                         bool wholePcMode) {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
 
-    std::vector<std::unique_ptr<WatchedRootContext>> contexts;
-    std::vector<HANDLE> waitHandles;
-    waitHandles.push_back(m_stopEvent);
+    std::unordered_map<ULONG_PTR, std::unique_ptr<WatchedRootContext>> contexts;
+    QSet<QString> activeWatchKeys;
+    ULONG_PTR nextId = 1;
 
-    for (const QString& rawRoot : roots) {
-        if (contexts.size() >= MAXIMUM_WAIT_OBJECTS - 1) {
-            break;
+    auto attachTarget = [&](const QString& rawPath, bool subtree) -> bool {
+        const QString cleanRoot = IndexingPolicy::normalizeNativePath(rawPath);
+        if (cleanRoot.isEmpty() || !QDir(cleanRoot).exists()) {
+            return false;
         }
-
-        const QString cleanRoot = QDir::toNativeSeparators(QDir::cleanPath(rawRoot));
-        if (!QDir(cleanRoot).exists()) {
-            continue;
+        const QString watchKey = cleanRoot.toLower() + (subtree ? QStringLiteral("|1") : QStringLiteral("|0"));
+        if (activeWatchKeys.contains(watchKey)) {
+            return false;
         }
 
         auto ctx = std::make_unique<WatchedRootContext>();
+        ctx->id = nextId++;
         ctx->rootPath = cleanRoot;
-        const std::wstring wideRoot = cleanRoot.toStdWString();
+        ctx->watchSubtree = subtree;
 
+        const std::wstring wideRoot = cleanRoot.toStdWString();
         ctx->dirHandle = CreateFileW(
             wideRoot.c_str(),
             FILE_LIST_DIRECTORY,
@@ -172,16 +194,25 @@ void DirectoryWatcher::watcherThreadMain(QStringList roots, QSet<QString> ignore
             nullptr);
 
         if (ctx->dirHandle == INVALID_HANDLE_VALUE || ctx->dirHandle == nullptr) {
-            continue;
+            return false;
         }
 
-        ctx->ioEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        if (ctx->ioEvent == nullptr || !issueAsyncRead(ctx.get())) {
-            continue;
+        if (CreateIoCompletionPort(ctx->dirHandle, m_iocpHandle, ctx->id, 0) != m_iocpHandle) {
+            return false;
         }
 
-        waitHandles.push_back(ctx->ioEvent);
-        contexts.push_back(std::move(ctx));
+        if (!issueAsyncRead(ctx.get())) {
+            return false;
+        }
+
+        activeWatchKeys.insert(watchKey);
+        const ULONG_PTR id = ctx->id;
+        contexts.emplace(id, std::move(ctx));
+        return true;
+    };
+
+    for (const WatchTarget& t : targets) {
+        attachTarget(t.rootPath, t.watchSubtree);
     }
 
     if (contexts.empty()) {
@@ -189,77 +220,77 @@ void DirectoryWatcher::watcherThreadMain(QStringList roots, QSet<QString> ignore
         return;
     }
 
+    core::Logger::info(QStringLiteral("Watcher"),
+                       QStringLiteral("Monitoring %1 directory watch handles via IOCP.").arg(contexts.size()));
+
     while (m_running.load(std::memory_order_relaxed)) {
-        DWORD waitTimeoutMs = INFINITE;
-        const auto now = std::chrono::steady_clock::now();
-        for (const auto& ctxPtr : contexts) {
-            if (!ctxPtr->pendingRenameOldPath.isEmpty()) {
-                if (now >= ctxPtr->pendingRenameDeadline) {
-                    waitTimeoutMs = 0;
-                    break;
-                }
-                const auto remMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    ctxPtr->pendingRenameDeadline - now).count();
-                const DWORD clamped = static_cast<DWORD>(std::clamp<long long>(remMs, 1, 100));
-                waitTimeoutMs = (waitTimeoutMs == INFINITE) ? clamped : std::min(waitTimeoutMs, clamped);
-            }
-        }
+        const DWORD waitTimeoutMs = computeNextTimeoutMs(contexts);
 
-        const DWORD waitRc = WaitForMultipleObjects(
-            static_cast<DWORD>(waitHandles.size()),
-            waitHandles.data(),
-            FALSE,
+        DWORD bytesTransferred = 0;
+        ULONG_PTR compKey = 0;
+        LPOVERLAPPED pOverlapped = nullptr;
+        const BOOL gqcsOk = GetQueuedCompletionStatus(
+            m_iocpHandle,
+            &bytesTransferred,
+            &compKey,
+            &pOverlapped,
             waitTimeoutMs);
+        const DWORD lastErr = gqcsOk ? ERROR_SUCCESS : GetLastError();
 
-        if (waitRc == WAIT_OBJECT_0 || !m_running.load(std::memory_order_relaxed)) {
-            break; // Stop event signaled
-        }
-
-        if (waitRc == WAIT_TIMEOUT) {
-            const auto checkTime = std::chrono::steady_clock::now();
-            for (const auto& ctxPtr : contexts) {
-                if (!ctxPtr->pendingRenameOldPath.isEmpty() && checkTime >= ctxPtr->pendingRenameDeadline) {
-                    QVector<FileChangeEvent> expiredBatch;
-                    flushExpiredRenameAsRemoved(ctxPtr.get(), &expiredBatch);
-                    if (!expiredBatch.isEmpty()) {
-                        emit fileChangesDetected(expiredBatch);
-                    }
-                }
-            }
-            continue;
-        }
-
-        if (waitRc < WAIT_OBJECT_0 + 1 || waitRc >= WAIT_OBJECT_0 + waitHandles.size()) {
+        if (!m_running.load(std::memory_order_relaxed) || compKey == kShutdownCompletionKey) {
             break;
         }
 
-        const size_t ctxIndex = static_cast<size_t>(waitRc - WAIT_OBJECT_0 - 1);
-        WatchedRootContext* ctx = contexts[ctxIndex].get();
+        if (!gqcsOk && pOverlapped == nullptr) {
+            if (lastErr == WAIT_TIMEOUT) {
+                const auto checkTime = std::chrono::steady_clock::now();
+                for (auto& [id, ctxPtr] : contexts) {
+                    Q_UNUSED(id);
+                    if (!ctxPtr->pendingRenameOldPath.isEmpty() && checkTime >= ctxPtr->pendingRenameDeadline) {
+                        QVector<FileChangeEvent> expiredBatch;
+                        flushExpiredRenameAsRemoved(ctxPtr.get(), &expiredBatch);
+                        if (!expiredBatch.isEmpty()) {
+                            emit fileChangesDetected(expiredBatch);
+                        }
+                    }
+                }
+                continue;
+            }
+            break;
+        }
 
-        DWORD bytesTransferred = 0;
-        const BOOL overOk = GetOverlappedResult(ctx->dirHandle, &ctx->overlapped, &bytesTransferred, FALSE);
-        const DWORD lastErr = overOk ? ERROR_SUCCESS : GetLastError();
-        if (overOk && bytesTransferred > 0) {
+        auto ctxIt = contexts.find(compKey);
+        if (ctxIt == contexts.end()) {
+            continue;
+        }
+        WatchedRootContext* ctx = ctxIt->second.get();
+
+        if (gqcsOk && bytesTransferred > 0) {
             QVector<FileChangeEvent> batch;
+            QStringList newlyDiscoveredSubtrees;
             const auto eventNow = std::chrono::steady_clock::now();
             if (!ctx->pendingRenameOldPath.isEmpty() && eventNow >= ctx->pendingRenameDeadline) {
                 flushExpiredRenameAsRemoved(ctx, &batch);
             }
 
+            const QString sep = ctx->rootPath.endsWith(QLatin1Char('\\')) ? QString() : QStringLiteral("\\");
             const BYTE* cursor = ctx->buffer;
             for (;;) {
                 const auto* info = reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(cursor);
                 const int charCount = static_cast<int>(info->FileNameLength / sizeof(WCHAR));
                 const QString relPath = QString::fromWCharArray(info->FileName, charCount);
 
-                if (!containsIgnoredSegment(relPath, ignoredLower)) {
-                    const QString fullPath = ctx->rootPath + QLatin1Char('\\') + relPath;
+                if (!IndexingPolicy::isRelativePathIgnored(ctx->rootPath, relPath, ignoredLower, wholePcMode)) {
+                    const QString fullPath = ctx->rootPath + sep + relPath;
                     switch (info->Action) {
                         case FILE_ACTION_ADDED: {
                             FileChangeEvent ev;
                             ev.action = FileChangeAction::AddedOrModified;
                             ev.path = fullPath;
                             batch.append(std::move(ev));
+                            if (!ctx->watchSubtree && QDir(fullPath).exists()) {
+                                newlyDiscoveredSubtrees.append(fullPath);
+                            }
                             break;
                         }
                         case FILE_ACTION_MODIFIED: {
@@ -296,6 +327,9 @@ void DirectoryWatcher::watcherThreadMain(QStringList roots, QSet<QString> ignore
                                 ev.path = fullPath;
                             }
                             batch.append(std::move(ev));
+                            if (!ctx->watchSubtree && QDir(fullPath).exists()) {
+                                newlyDiscoveredSubtrees.append(fullPath);
+                            }
                             break;
                         }
                         default:
@@ -312,24 +346,75 @@ void DirectoryWatcher::watcherThreadMain(QStringList roots, QSet<QString> ignore
             if (!batch.isEmpty()) {
                 emit fileChangesDetected(batch);
             }
+            for (const QString& newDir : newlyDiscoveredSubtrees) {
+                if (attachTarget(newDir, true)) {
+                    emit directorySubtreeAdded(newDir);
+                }
+            }
         } else if (m_running.load(std::memory_order_relaxed) &&
-                   ((overOk && bytesTransferred == 0) || lastErr == ERROR_NOTIFY_ENUM_DIR)) {
+                   ((gqcsOk && bytesTransferred == 0) || lastErr == ERROR_NOTIFY_ENUM_DIR)) {
             QVector<FileChangeEvent> overflowFlush;
             flushExpiredRenameAsRemoved(ctx, &overflowFlush);
             if (!overflowFlush.isEmpty()) {
                 emit fileChangesDetected(overflowFlush);
             }
-            core::Logger::warning(
-                QStringLiteral("Watcher"),
-                QStringLiteral("Directory change buffer overflowed for %1; requesting targeted rescan.")
-                    .arg(ctx->rootPath));
-            emit watcherOverflowRescanNeeded(ctx->rootPath);
+            if (ctx->watchSubtree) {
+                core::Logger::warning(
+                    QStringLiteral("Watcher"),
+                    QStringLiteral("Directory change buffer overflowed for %1; requesting debounced reconcile.")
+                        .arg(ctx->rootPath));
+                emit watcherOverflowRescanNeeded(ctx->rootPath);
+            }
+        } else if (!gqcsOk && (lastErr == ERROR_ACCESS_DENIED || lastErr == ERROR_INVALID_HANDLE ||
+                               lastErr == ERROR_OPERATION_ABORTED)) {
+            contexts.erase(ctxIt);
+            continue;
         }
 
         if (!issueAsyncRead(ctx)) {
-            break;
+            contexts.erase(ctxIt);
         }
     }
+
+    // Cancel and close all directory handles, then drain queued IOCP packets briefly before freeing OVERLAPPED buffers
+    for (auto& [id, ctxPtr] : contexts) {
+        Q_UNUSED(id);
+        if (ctxPtr->dirHandle != INVALID_HANDLE_VALUE && ctxPtr->dirHandle != nullptr) {
+            if (ctxPtr->pendingIo) {
+                CancelIoEx(ctxPtr->dirHandle, &ctxPtr->overlapped);
+            }
+            CloseHandle(ctxPtr->dirHandle);
+            ctxPtr->dirHandle = INVALID_HANDLE_VALUE;
+        }
+    }
+    const auto drainStart = std::chrono::steady_clock::now();
+    for (;;) {
+        bool anyPending = false;
+        for (const auto& [id, ctxPtr] : contexts) {
+            Q_UNUSED(id);
+            if (ctxPtr->pendingIo) {
+                anyPending = true;
+                break;
+            }
+        }
+        if (!anyPending ||
+            (std::chrono::steady_clock::now() - drainStart) >= std::chrono::milliseconds(300)) {
+            break;
+        }
+        DWORD bytes = 0;
+        ULONG_PTR key = 0;
+        LPOVERLAPPED ov = nullptr;
+        if (GetQueuedCompletionStatus(m_iocpHandle, &bytes, &key, &ov, 25) == FALSE && ov == nullptr) {
+            break;
+        }
+        if (key != kShutdownCompletionKey) {
+            auto it = contexts.find(key);
+            if (it != contexts.end()) {
+                it->second->pendingIo = false;
+            }
+        }
+    }
+    contexts.clear();
 }
 
 } // namespace lumen::indexing

@@ -85,7 +85,8 @@ bool LumenApplication::initialize(bool startBackgroundIndexer) {
             idxSettings.enableContentIndexing,
             idxSettings.maxContentIndexedFiles,
             static_cast<qint64>(idxSettings.maxDocumentSizeMb) * 1024LL * 1024LL,
-            idxSettings.enableSemanticIndexing);
+            idxSettings.enableSemanticIndexing,
+            idxSettings.indexWholePc);
     }
 
     m_initialized = true;
