@@ -121,7 +121,10 @@ Section "Lumen" Main
     CreateShortcut "$SMPROGRAMS\UshaLabs\Uninstall Lumen.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0
 
     ; Start Lumen automatically on Windows bootup in the system tray with desktop icon
-    WriteRegStr HKCU "${STARTUP_RUN_KEY}" "${STARTUP_VALUE}" '$\"$INSTDIR\Lumen.exe$\"'
+    WriteRegStr HKCU "${STARTUP_RUN_KEY}" "${STARTUP_VALUE}" '$\"$INSTDIR\Lumen.exe$\" --startup'
+    nsExec::ExecToStack '"$INSTDIR\Lumen.exe" --register-autostart'
+    Pop $Result
+    Pop $Output
   ${EndIf}
 
   ; Register in 64-bit Add/Remove Programs
@@ -175,9 +178,16 @@ Section "Uninstall"
     RMDir "$SMPROGRAMS\UshaLabs"
     Delete "$DESKTOP\Lumen.lnk"
 
-    ; Remove per-user sign-in autostart entry if it points to this installation
+    ; Remove per-user sign-in scheduled task & autostart entry if it points to this installation
+    ${If} ${FileExists} "$INSTDIR\Lumen.exe"
+      nsExec::ExecToStack '"$INSTDIR\Lumen.exe" --unregister-autostart'
+      Pop $Result
+      Pop $Output
+    ${EndIf}
     ReadRegStr $Result HKCU "${STARTUP_RUN_KEY}" "${STARTUP_VALUE}"
     ${If} $Result == '$\"$INSTDIR\Lumen.exe$\"'
+      DeleteRegValue HKCU "${STARTUP_RUN_KEY}" "${STARTUP_VALUE}"
+    ${ElseIf} $Result == '$\"$INSTDIR\Lumen.exe$\" --startup'
       DeleteRegValue HKCU "${STARTUP_RUN_KEY}" "${STARTUP_VALUE}"
     ${EndIf}
   ${EndIf}

@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QSystemTrayIcon>
+#include <QTimer>
 
 namespace lumen::indexing {
 class FileIndexer;
@@ -29,6 +30,8 @@ public:
     void initialize();
     void syncStateFromSettings();
     void recreateTrayAfterExplorerRestart();
+    void ensureTrayIconVisible();
+    bool isTrayRegistered() const noexcept { return m_trayRegistered; }
 
     QSystemTrayIcon* trayIcon() const noexcept { return m_trayIcon; }
     QMenu* contextMenu() const noexcept { return m_menu; }
@@ -54,6 +57,10 @@ private:
     indexing::FileIndexer* m_fileIndexer = nullptr;
     QSystemTrayIcon* m_trayIcon = nullptr;
     QMenu* m_menu = nullptr;
+    QTimer* m_trayEnsureTimer = nullptr;
+    bool m_trayRegistered = false;
+    bool m_exiting = false;
+    int m_trayRetryCount = 0;
 
     QAction* m_showSearchAction = nullptr;
     QAction* m_toggleDesktopBarAction = nullptr;

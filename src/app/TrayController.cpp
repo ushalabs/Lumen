@@ -4,6 +4,7 @@
 #include "core/SettingsManager.h"
 #include "database/DatabaseManager.h"
 #include "indexing/FileIndexer.h"
+#include "platform/windows/DesktopIntegration.h"
 #include "ui/BrandingIcon.h"
 #include "ui/DesktopSearchBar/DesktopSearchBar.h"
 #include "ui/Settings/SettingsDialog.h"
@@ -18,6 +19,10 @@ TrayController::TrayController(ui::DesktopSearchBar* searchBar,
     : QObject(parent), m_searchBar(searchBar), m_fileIndexer(fileIndexer) {}
 
 TrayController::~TrayController() {
+    m_exiting = true;
+    if (m_trayEnsureTimer != nullptr) {
+        m_trayEnsureTimer->stop();
+    }
     if (m_trayIcon != nullptr) {
         m_trayIcon->hide();
     }
@@ -58,11 +63,6 @@ void TrayController::initialize() {
     m_exitAction = m_menu->addAction(QStringLiteral("Exit Lumen"));
     connect(m_exitAction, &QAction::triggered, this, &TrayController::onExitTriggered);
 
-    m_trayIcon = new QSystemTrayIcon(ui::BrandingIcon::createAppIcon(), this);
-    m_trayIcon->setToolTip(QStringLiteral("Lumen — Offline Intelligent Search (UshaLabs)"));
-    m_trayIcon->setContextMenu(m_menu);
-
-    connect(m_trayIcon, &QSystemTrayIcon::activated, this, &TrayController::onTrayActivated);
     if (m_searchBar != nullptr) {
         connect(m_searchBar,
                 &ui::DesktopSearchBar::explorerRestartDetected,
@@ -70,8 +70,71 @@ void TrayController::initialize() {
                 &TrayController::recreateTrayAfterExplorerRestart);
     }
 
+    m_trayEnsureTimer = new QTimer(this);
+    m_trayEnsureTimer->setInterval(500);
+    connect(m_trayEnsureTimer, &QTimer::timeout, this, &TrayController::ensureTrayIconVisible);
+
     syncStateFromSettings();
+    ensureTrayIconVisible();
+}
+
+void TrayController::ensureTrayIconVisible() {
+    if (m_exiting || m_menu == nullptr) {
+        return;
+    }
+
+    constexpr int kMaxTrayRetries = 60; // Wait up to 30 seconds for Windows Explorer shell tray on bootup
+    const bool ready = QSystemTrayIcon::isSystemTrayAvailable() &&
+                       platform::windows::DesktopIntegration::isNotificationTrayReady();
+
+    if (!ready) {
+        if (!m_trayEnsureTimer->isActive()) {
+            core::Logger::info(QStringLiteral("Tray"),
+                               QStringLiteral("Windows system tray not ready yet; scheduling registration retry."));
+            m_trayRetryCount = 0;
+            m_trayEnsureTimer->start();
+        } else {
+            ++m_trayRetryCount;
+            if (m_trayRetryCount >= kMaxTrayRetries) {
+                m_trayEnsureTimer->stop();
+                core::Logger::warning(QStringLiteral("Tray"),
+                                      QStringLiteral("Timed out waiting for Windows notification area; attempting tray show."));
+            } else {
+                return;
+            }
+        }
+        if (m_trayRetryCount < kMaxTrayRetries) {
+            return;
+        }
+    }
+
+    if (m_trayEnsureTimer != nullptr && m_trayEnsureTimer->isActive()) {
+        m_trayEnsureTimer->stop();
+    }
+
+    if (m_trayRegistered && m_trayIcon != nullptr && m_trayIcon->isVisible()) {
+        return;
+    }
+
+    if (m_trayIcon != nullptr) {
+        m_trayIcon->hide();
+        m_trayIcon->deleteLater();
+        m_trayIcon = nullptr;
+    }
+
+    m_trayIcon = new QSystemTrayIcon(ui::BrandingIcon::createAppIcon(), this);
+    const QString tooltip = QStringLiteral("Lumen — Offline Intelligent Search (UshaLabs)");
+    m_trayIcon->setToolTip(tooltip);
+    m_trayIcon->setContextMenu(m_menu);
+    connect(m_trayIcon, &QSystemTrayIcon::activated, this, &TrayController::onTrayActivated);
     m_trayIcon->show();
+    m_trayIcon->setToolTip(tooltip);
+
+    m_trayRegistered = m_trayIcon->isVisible();
+    core::Logger::info(QStringLiteral("Tray"),
+                       m_trayRegistered
+                           ? QStringLiteral("System tray icon registered and active.")
+                           : QStringLiteral("Attempted system tray registration."));
 }
 
 void TrayController::syncStateFromSettings() {
@@ -91,10 +154,9 @@ void TrayController::syncStateFromSettings() {
 }
 
 void TrayController::recreateTrayAfterExplorerRestart() {
-    if (m_trayIcon != nullptr) {
-        m_trayIcon->hide();
-        m_trayIcon->show();
-    }
+    m_trayRegistered = false;
+    m_trayRetryCount = 0;
+    ensureTrayIconVisible();
 }
 
 void TrayController::onShowSearchTriggered() {
@@ -196,12 +258,18 @@ void TrayController::onSettingsTriggered() {
 
 void TrayController::onExitTriggered() {
     core::Logger::info(QStringLiteral("App"), QStringLiteral("User requested Exit Lumen from system tray."));
+    m_exiting = true;
+    m_trayRegistered = false;
+    if (m_trayEnsureTimer != nullptr) {
+        m_trayEnsureTimer->stop();
+    }
     if (m_activeSettingsDialog != nullptr) {
         m_activeSettingsDialog->close();
     }
     if (m_searchBar != nullptr) {
-        m_searchBar->collapsePopupAndDeactivate(false);
+        m_searchBar->collapsePopupAndDeactivate(false, false);
         m_searchBar->hide();
+        m_searchBar->allowCloseForExit();
         m_searchBar->close();
     }
     if (m_trayIcon != nullptr) {

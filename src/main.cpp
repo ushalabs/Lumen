@@ -1,13 +1,40 @@
 #include "app/LumenApplication.h"
+#include "core/SettingsManager.h"
 #include "platform/windows/SingleInstanceGuard.h"
 #include "ui/BrandingIcon.h"
 
 #include <QApplication>
+#include <QCoreApplication>
+#include <QString>
 
 int main(int argc, char* argv[]) {
+    bool isAutostartLaunch = false;
+    bool registerAutostart = false;
+    bool unregisterAutostart = false;
+    for (int i = 1; i < argc; ++i) {
+        const QString arg = QString::fromLocal8Bit(argv[i]).trimmed();
+        if (arg.compare(QStringLiteral("--startup"), Qt::CaseInsensitive) == 0) {
+            isAutostartLaunch = true;
+        } else if (arg.compare(QStringLiteral("--register-autostart"), Qt::CaseInsensitive) == 0) {
+            registerAutostart = true;
+        } else if (arg.compare(QStringLiteral("--unregister-autostart"), Qt::CaseInsensitive) == 0) {
+            unregisterAutostart = true;
+        }
+    }
+
+    if (registerAutostart || unregisterAutostart) {
+        QCoreApplication coreApp(argc, argv);
+        const bool ok = lumen::core::SettingsManager::applyRegistryAutostart(
+            registerAutostart,
+            QCoreApplication::applicationFilePath());
+        return ok ? 0 : 1;
+    }
+
     lumen::platform::windows::SingleInstanceGuard instanceGuard;
     if (!instanceGuard.tryAcquirePrimary()) {
-        lumen::platform::windows::SingleInstanceGuard::notifyExistingInstance();
+        if (!isAutostartLaunch) {
+            lumen::platform::windows::SingleInstanceGuard::notifyExistingInstance();
+        }
         return 0;
     }
 

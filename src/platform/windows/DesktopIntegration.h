@@ -32,7 +32,10 @@ public:
                                           int bottomPx,
                                           int radiusPx);
 
-    // Places the widget at the bottom of the Z-order so normal/maximized windows cover it.
+    // Returns the Z-order anchor HWND right above the desktop wallpaper/icons and below open windows.
+    static HWND desktopRestInsertAfter(HWND widgetHwnd);
+
+    // Places the widget cleanly on the desktop layer (above wallpaper/icons, below normal app windows).
     static void placeOnDesktopBottom(HWND hwnd);
 
     // Raises the widget above the shell desktop layer without stealing focus (used on Win+D).
@@ -41,8 +44,22 @@ public:
     // Brings the widget to foreground and grants keyboard focus for active search entry.
     static void activateForSearchInput(HWND hwnd);
 
-    // Checks whether a given HWND belongs to the Windows desktop shell (Progman or WorkerW).
+    // Checks whether a given HWND belongs to the Windows desktop shell (Progman, WorkerW, or Shell_TrayWnd).
     static bool isShellDesktopWindow(HWND hwnd);
+
+    // Checks whether a visible window is a desktop wallpaper/icon surface (Progman or desktop WorkerW).
+    static bool isDesktopBackgroundWindow(HWND hwnd);
+
+    // Checks whether Explorer's notification tray (Shell_TrayWnd / TrayNotifyWnd) is ready.
+    static bool isNotificationTrayReady();
+
+    // Manages a per-user Windows Task Scheduler logon trigger for immediate bootup launch.
+    static bool setLogonScheduledTask(bool enabled,
+                                      const QString& executablePath,
+                                      const QString& arguments = QStringLiteral("--startup"),
+                                      const QString& taskName = QStringLiteral("Lumen"));
+    static bool queryLogonScheduledTaskEnabled(const QString& taskName = QStringLiteral("Lumen"),
+                                               QString* outExecutablePath = nullptr);
 
     // Checks whether the current foreground window is a fullscreen application on the same monitor.
     static bool isForegroundWindowFullscreen(HWND widgetHwnd);

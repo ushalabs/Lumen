@@ -115,6 +115,8 @@ target_link_libraries(lumen_lib PUBLIC
     user32
     shell32
     ole32
+    oleaut32
+    taskschd
     advapi32
     psapi
 )

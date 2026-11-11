@@ -9,6 +9,8 @@
 #include "ui/DesktopSearchBar/DesktopSearchBar.h"
 #include "ui/SearchResults/SearchPopupWidget.h"
 
+#include <QCoreApplication>
+
 namespace lumen::app {
 
 LumenApplication::LumenApplication(QObject* parent)
@@ -31,6 +33,9 @@ bool LumenApplication::initialize(bool startBackgroundIndexer) {
     core::Logger::info(QStringLiteral("App"), QStringLiteral("Starting UshaLabs Lumen v0.5.1."));
 
     core::SettingsManager::instance().load();
+    if (startBackgroundIndexer) {
+        core::SettingsManager::instance().ensureAutostartSynced(QCoreApplication::applicationFilePath());
+    }
 
     if (!database::DatabaseManager::instance().initialize(core::AppPaths::databaseFilePath())) {
         core::Logger::error(QStringLiteral("App"), QStringLiteral("Database initialization failed."));
@@ -108,6 +113,7 @@ void LumenApplication::shutdown() {
     }
 
     if (m_searchBar) {
+        m_searchBar->allowCloseForExit();
         m_searchBar->close();
         m_searchBar.reset();
     }

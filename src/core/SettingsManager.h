@@ -41,6 +41,7 @@ public:
 
     bool startWithWindows() const;
     bool setStartWithWindows(bool enabled, const QString& executablePath = QString(), bool updateRegistry = true);
+    bool ensureAutostartSynced(const QString& executablePath = QString());
 
     QString appearancePreference() const;
     void setAppearancePreference(const QString& preference, bool persistImmediately = true);
@@ -61,6 +62,7 @@ public:
 
     static QStringList defaultIgnoredDirectories();
     static bool queryRegistryAutostartEnabled();
+    static bool applyRegistryAutostart(bool enabled, const QString& executablePath);
 
 private:
     SettingsManager();
@@ -69,7 +71,6 @@ private:
     SettingsManager& operator=(const SettingsManager&) = delete;
 
     void resetToDefaultsUnlocked();
-    static bool applyRegistryAutostart(bool enabled, const QString& executablePath);
 
     mutable QMutex m_mutex;
     QString m_filePath;
@@ -77,7 +78,7 @@ private:
     bool m_alwaysOnTopMode = false;
     bool m_hasCustomPosition = false;
     QPoint m_desktopBarPos{0, 0};
-    bool m_startWithWindows = false;
+    bool m_startWithWindows = true;
     QString m_appearancePreference = QStringLiteral("light");
     QString m_globalShortcut = QStringLiteral("Ctrl+Alt+Space");
     IndexingSettingsPlaceholder m_indexing;

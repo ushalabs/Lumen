@@ -11,6 +11,7 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QCloseEvent>
 #include <QColor>
 #include <QDesktopServices>
 #include <QDir>
@@ -1198,6 +1199,28 @@ void DesktopSearchBar::showEvent(QShowEvent* event) {
     if (!m_hotkeyRegistered) {
         registerConfiguredGlobalShortcut();
     }
+    if (!m_initialShellZOrderScheduled) {
+        m_initialShellZOrderScheduled = true;
+        auto reanchorIfResting = [this]() {
+            if (isVisible() && !m_alwaysOnTop && !m_isSearchActive && !m_barExpanded &&
+                !m_closingBar && !m_closingPopup) {
+                applyRestingWindowZOrder();
+            }
+        };
+        QTimer::singleShot(1500, this, reanchorIfResting);
+        QTimer::singleShot(4500, this, reanchorIfResting);
+    }
+}
+
+void DesktopSearchBar::closeEvent(QCloseEvent* event) {
+    if (!m_allowClose) {
+        event->ignore();
+        if (m_barExpanded || m_popupExpanded) {
+            collapsePopupAndDeactivate(true);
+        }
+        return;
+    }
+    QWidget::closeEvent(event);
 }
 
 void DesktopSearchBar::leaveEvent(QEvent* event) {
@@ -1467,7 +1490,8 @@ bool DesktopSearchBar::nativeEvent(const QByteArray& eventType, void* message, q
             !m_closingBar && !m_closingPopup && !m_keepAboveShellTemp) {
             auto* wp = reinterpret_cast<WINDOWPOS*>(msg->lParam);
             if (wp != nullptr && (wp->flags & SWP_NOZORDER) == 0) {
-                wp->hwndInsertAfter = HWND_BOTTOM;
+                const HWND targetAfter = platform::windows::DesktopIntegration::desktopRestInsertAfter(msg->hwnd);
+                wp->hwndInsertAfter = (targetAfter == HWND_NOTOPMOST) ? HWND_TOP : targetAfter;
             }
         }
 

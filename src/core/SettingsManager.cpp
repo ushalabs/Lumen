@@ -2,6 +2,7 @@
 
 #include "core/AppPaths.h"
 #include "core/Logger.h"
+#include "platform/windows/DesktopIntegration.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -22,6 +23,7 @@ namespace lumen::core {
 
 namespace {
 constexpr const wchar_t* kRunRegistrySubKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+constexpr const wchar_t* kStartupApprovedSubKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
 constexpr const wchar_t* kRunRegistryValueName = L"UshaLabs.Lumen";
 
 class ScopedRegKey {
@@ -42,6 +44,75 @@ public:
 private:
     HKEY m_key = nullptr;
 };
+
+QString readRegistryStringValue(const wchar_t* subKey, const wchar_t* valueName) {
+    ScopedRegKey key;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, subKey, 0, KEY_READ, key.receive()) != ERROR_SUCCESS || !key) {
+        return {};
+    }
+    DWORD type = 0;
+    DWORD dataSize = 0;
+    const LSTATUS sizeStatus = RegQueryValueExW(key.get(), valueName, nullptr, &type, nullptr, &dataSize);
+    if (sizeStatus != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ) || dataSize <= sizeof(wchar_t)) {
+        return {};
+    }
+    std::wstring buf(dataSize / sizeof(wchar_t), L'\0');
+    const LSTATUS readStatus = RegQueryValueExW(
+        key.get(),
+        valueName,
+        nullptr,
+        &type,
+        reinterpret_cast<BYTE*>(buf.data()),
+        &dataSize);
+    if (readStatus != ERROR_SUCCESS) {
+        return {};
+    }
+    while (!buf.empty() && buf.back() == L'\0') {
+        buf.pop_back();
+    }
+    return QString::fromStdWString(buf).trimmed();
+}
+
+bool isStartupApprovedDisabled() {
+    ScopedRegKey key;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kStartupApprovedSubKey, 0, KEY_READ, key.receive()) != ERROR_SUCCESS || !key) {
+        return false;
+    }
+    BYTE bytes[16] = {0};
+    DWORD type = 0;
+    DWORD size = sizeof(bytes);
+    const LSTATUS st = RegQueryValueExW(key.get(), kRunRegistryValueName, nullptr, &type, bytes, &size);
+    if (st != ERROR_SUCCESS || type != REG_BINARY || size < 1) {
+        return false;
+    }
+    // Windows marks disabled StartupApproved entries with odd low bit (e.g. 0x03)
+    return (bytes[0] & 0x01) != 0;
+}
+
+void setStartupApprovedEnabled(bool enabled) {
+    ScopedRegKey key;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER,
+                        kStartupApprovedSubKey,
+                        0,
+                        nullptr,
+                        REG_OPTION_NON_VOLATILE,
+                        KEY_SET_VALUE | KEY_QUERY_VALUE,
+                        nullptr,
+                        key.receive(),
+                        nullptr) != ERROR_SUCCESS || !key) {
+        return;
+    }
+    if (enabled) {
+        const BYTE approvedBytes[12] = {0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+        RegSetValueExW(key.get(), kRunRegistryValueName, 0, REG_BINARY, approvedBytes, sizeof(approvedBytes));
+    } else {
+        RegDeleteValueW(key.get(), kRunRegistryValueName);
+    }
+}
+
+QString expectedRunCommand(const QString& executablePath) {
+    return QStringLiteral("\"%1\" --startup").arg(QDir::toNativeSeparators(executablePath));
+}
 } // namespace
 
 SettingsManager& SettingsManager::instance() {
@@ -77,7 +148,7 @@ void SettingsManager::resetToDefaultsUnlocked() {
     m_alwaysOnTopMode = false;
     m_hasCustomPosition = false;
     m_desktopBarPos = QPoint(0, 0);
-    m_startWithWindows = false;
+    m_startWithWindows = true;
     m_appearancePreference = QStringLiteral("light");
     m_globalShortcut = QStringLiteral("Ctrl+Alt+Space");
 
@@ -101,7 +172,7 @@ bool SettingsManager::load(const QString& filePath) {
 
     QFile file(m_filePath);
     if (!file.exists()) {
-        m_startWithWindows = queryRegistryAutostartEnabled();
+        m_startWithWindows = true;
         locker.unlock();
         return save();
     }
@@ -133,7 +204,11 @@ bool SettingsManager::load(const QString& filePath) {
         m_desktopBarPos.setY(posObj.value(QStringLiteral("y")).toInt(0));
     }
 
-    m_startWithWindows = queryRegistryAutostartEnabled();
+    if (root.contains(QStringLiteral("startWithWindows"))) {
+        m_startWithWindows = root.value(QStringLiteral("startWithWindows")).toBool(true);
+    } else {
+        m_startWithWindows = true;
+    }
     m_appearancePreference = root.value(QStringLiteral("appearancePreference")).toString(QStringLiteral("light"));
     m_globalShortcut = root.value(QStringLiteral("globalShortcut")).toString(QStringLiteral("Ctrl+Alt+Space"));
 
@@ -342,7 +417,7 @@ bool SettingsManager::setStartWithWindows(bool enabled, const QString& executabl
                                 : QDir::toNativeSeparators(executablePath);
         if (!applyRegistryAutostart(enabled, exe)) {
             Logger::warning(QStringLiteral("Settings"),
-                            QStringLiteral("Failed to update Windows Run registry entry."));
+                            QStringLiteral("Failed to update Windows startup registration."));
             return false;
         }
     }
@@ -351,6 +426,36 @@ bool SettingsManager::setStartWithWindows(bool enabled, const QString& executabl
         m_startWithWindows = enabled;
     }
     return save();
+}
+
+bool SettingsManager::ensureAutostartSynced(const QString& executablePath) {
+    if (!startWithWindows()) {
+        return true;
+    }
+
+    const QString exe = QDir::toNativeSeparators(
+        executablePath.isEmpty() ? QCoreApplication::applicationFilePath() : executablePath);
+    if (exe.isEmpty()) {
+        return false;
+    }
+
+    const QString currentRunCmd = readRegistryStringValue(kRunRegistrySubKey, kRunRegistryValueName);
+    const QString expectedCmd = expectedRunCommand(exe);
+    const bool runMatches = (currentRunCmd.compare(expectedCmd, Qt::CaseInsensitive) == 0) &&
+                            !isStartupApprovedDisabled();
+
+    QString taskExe;
+    const bool taskValid =
+        platform::windows::DesktopIntegration::queryLogonScheduledTaskEnabled(QStringLiteral("Lumen"), &taskExe) &&
+        (taskExe.compare(exe, Qt::CaseInsensitive) == 0);
+
+    if (runMatches && taskValid) {
+        return true;
+    }
+
+    Logger::info(QStringLiteral("Settings"),
+                 QStringLiteral("Synchronizing Windows startup registration for instant logon tray launch."));
+    return applyRegistryAutostart(true, exe);
 }
 
 QString SettingsManager::appearancePreference() const {
@@ -484,39 +589,56 @@ void SettingsManager::clearRecentSearches(bool persistImmediately) {
 }
 
 bool SettingsManager::queryRegistryAutostartEnabled() {
-    ScopedRegKey key;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunRegistrySubKey, 0, KEY_READ, key.receive()) != ERROR_SUCCESS) {
-        return false;
-    }
-
-    DWORD type = 0;
-    DWORD dataSize = 0;
-    const LSTATUS status = RegQueryValueExW(key.get(), kRunRegistryValueName, nullptr, &type, nullptr, &dataSize);
-    return (status == ERROR_SUCCESS && (type == REG_SZ || type == REG_EXPAND_SZ) && dataSize > sizeof(wchar_t));
+    const QString cmd = readRegistryStringValue(kRunRegistrySubKey, kRunRegistryValueName);
+    const bool runActive = !cmd.isEmpty() && !isStartupApprovedDisabled();
+    const bool taskActive =
+        platform::windows::DesktopIntegration::queryLogonScheduledTaskEnabled(QStringLiteral("Lumen"));
+    return runActive || taskActive;
 }
 
 bool SettingsManager::applyRegistryAutostart(bool enabled, const QString& executablePath) {
+    bool regOk = false;
     ScopedRegKey key;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunRegistrySubKey, 0, KEY_SET_VALUE | KEY_QUERY_VALUE, key.receive()) != ERROR_SUCCESS) {
-        return false;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER,
+                        kRunRegistrySubKey,
+                        0,
+                        nullptr,
+                        REG_OPTION_NON_VOLATILE,
+                        KEY_SET_VALUE | KEY_QUERY_VALUE,
+                        nullptr,
+                        key.receive(),
+                        nullptr) == ERROR_SUCCESS && key) {
+        if (enabled) {
+            const QString quotedCommand = expectedRunCommand(executablePath);
+            const std::wstring wideCmd = quotedCommand.toStdWString();
+            const DWORD byteLen = static_cast<DWORD>((wideCmd.size() + 1) * sizeof(wchar_t));
+            const LSTATUS status = RegSetValueExW(
+                key.get(),
+                kRunRegistryValueName,
+                0,
+                REG_SZ,
+                reinterpret_cast<const BYTE*>(wideCmd.c_str()),
+                byteLen);
+            regOk = (status == ERROR_SUCCESS);
+            setStartupApprovedEnabled(true);
+        } else {
+            const LSTATUS status = RegDeleteValueW(key.get(), kRunRegistryValueName);
+            regOk = (status == ERROR_SUCCESS || status == ERROR_FILE_NOT_FOUND);
+            setStartupApprovedEnabled(false);
+        }
     }
 
-    if (enabled) {
-        const QString quotedCommand = QStringLiteral("\"%1\"").arg(executablePath);
-        const std::wstring wideCmd = quotedCommand.toStdWString();
-        const DWORD byteLen = static_cast<DWORD>((wideCmd.size() + 1) * sizeof(wchar_t));
-        const LSTATUS status = RegSetValueExW(
-            key.get(),
-            kRunRegistryValueName,
-            0,
-            REG_SZ,
-            reinterpret_cast<const BYTE*>(wideCmd.c_str()),
-            byteLen);
-        return status == ERROR_SUCCESS;
-    } else {
-        const LSTATUS status = RegDeleteValueW(key.get(), kRunRegistryValueName);
-        return (status == ERROR_SUCCESS || status == ERROR_FILE_NOT_FOUND);
+    const bool taskOk = platform::windows::DesktopIntegration::setLogonScheduledTask(
+        enabled,
+        executablePath,
+        QStringLiteral("--startup"),
+        QStringLiteral("Lumen"));
+    if (enabled && !taskOk) {
+        Logger::warning(QStringLiteral("Settings"),
+                        QStringLiteral("Could not register Windows logon scheduled task; relying on Run key fallback."));
     }
+
+    return regOk || taskOk;
 }
 
 } // namespace lumen::core

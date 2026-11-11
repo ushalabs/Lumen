@@ -70,6 +70,7 @@ public:
     void refreshAppearanceFromSettings();
     bool registerConfiguredGlobalShortcut();
     void notifyIndexUpdated();
+    void allowCloseForExit() noexcept { m_allowClose = true; }
 
     void revealResultInExplorer(const search::FileSearchResult& result);
     void copyResultFileToClipboard(const search::FileSearchResult& result);
@@ -91,6 +92,7 @@ protected:
     void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void showEvent(QShowEvent* event) override;
+    void closeEvent(QCloseEvent* event) override;
     void leaveEvent(QEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
@@ -157,6 +159,8 @@ private:
 
     bool m_hotkeyRegistered = false;
     bool m_openFilesWithShell = true;
+    bool m_allowClose = false;
+    bool m_initialShellZOrderScheduled = false;
     QString m_hotkeyError;
 };
 
