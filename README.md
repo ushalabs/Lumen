@@ -52,11 +52,7 @@ Open Lumen from the desktop launcher or press **`Ctrl+Alt+Space`** from anywhere
 ## Demo
 
 <p align="center">
-  <img src="docs/media/lumen_demo.gif" alt="Lumen Live Demo" width="60%" />
-</p>
-
-<p align="center">
-  <a href="docs/media/lumen_demo.mp4">Watch full-resolution demo video (MP4)</a>
+  <img src="docs/media/lumen_demo.webp" alt="Lumen Live Demo" width="80%" />
 </p>
 
 The walkthrough covers instant desktop lookup, whole-PC app and folder search across drives, offline semantic search, PDF/Word and spreadsheet content previews, and configuring folders in Settings.
