@@ -5,8 +5,9 @@
 **Repository:** https://github.com/ushalabs/Lumen  
 **Target Platform:** Windows 10 / Windows 11 (x64)  
 **Application Version:** `0.5.1` (`FILEVERSION 0,5,1,0`)  
-**Tested Baseline & Fix Verification Window:** `2026-11-11 00:02–00:56 +05:00` (`49ab168` baseline → `v0.5.1` stabilization fixes)  
-**Release Readiness Verdict:** **`CONDITIONAL PASS — RELEASE CANDIDATE`** *(All P1 release blockers resolved in code/packaging; documented P2/P3 issues, unsigned binary SmartScreen warning, unverified multi-DPI/Office environments, and user-approved Git history rewrite for historical `.pfx` exposure remain.)*
+**Git HEAD at Whole-PC Validation:** Branch `WholePC/Search` (branched from `main` @ `2e8815dd6688557463021841c647a530abd2e1c8`) — 2-Tier Whole-PC Indexing, IOCP Watcher, & Schema `v6` (`folders_fts`)  
+**Validation Windows:** `2026-11-11 00:02–00:56 +05:00` (`v0.5.1` P1 release suite) & `2026-11-11 16:01–17:18 +05:00` (2-Tier Whole-PC + 1M-Row Scale + IOCP + Schema `v6` + Clean Build & NSIS Repackage)  
+**Release Readiness Verdict:** **`CONDITIONAL PASS — RELEASE CANDIDATE`** *(All P1 blockers `DEF-01`–`DEF-03`, startup/tray/Z-order hardening, 2-Tier Whole-PC + Scoped AI + 1M-row `< 50 ms` P95 verification, clean `/W4` Release build, and local NSIS Setup + Portable ZIP repackaging/install checks pass cleanly; external Authenticode signing, optional Git history purge for historical commit `05bc8da`, and documented P2/P3 items remain.)*
 
 ---
 
@@ -14,20 +15,25 @@
 
 - **Overall Acceptance Verdict:** **`CONDITIONAL PASS — RELEASE CANDIDATE`**
 - **Application Version:** `0.5.1` ([CMakeLists.txt](CMakeLists.txt), [assets/app.rc](assets/app.rc), [assets/lumen.manifest](assets/lumen.manifest))
-- **Verified Revision:** Built on `49ab168396262ff391a8bb4c39655f8e46cc427a` + **Lumen v0.5.1 P1 release blocker fixes (`DEF-01`, `DEF-02`, `DEF-03`)**
-- **Test Environment:** Windows 11 Pro (`Build 26200`, 64-bit), 11th Gen Intel Core i7-1185G7 (`4C/8T @ 3.00 GHz`), `15.69 GB` RAM, NVMe SSD (NTFS), single `1536×864` display at `125%` scaling (`120 DPI`), MSVC `19.44.35229.0` (`x64`), CMake `3.31.6-msvc6`, Ninja `1.12.1`, Qt `6.8.2`, SQLite `3.47.2`, ONNX Runtime `1.20.20241119.10.5c1b7cc`, PDFium (`chromium/8152`, BSD-3-Clause), NSIS `v3.12`.
-- **Test Date:** `2026-11-11`
+- **Verified Revision:** `2e8815dd6688557463021841c647a530abd2e1c8` (`main` baseline) → branch `WholePC/Search` (**2-Tier Whole-PC Indexing, `schemaVersion = 3` settings, SQLite Schema `v6` `folders_fts`, Win32 IOCP `DirectoryWatcher`, partitioned memory-bounded reconciliation, `FileSearchEngine` split/composite index optimization, and `FileIndexer::runScanAndReconcile` cancellation-reset fix**).
+- **Test Environment:** Windows 11 Pro (`10.0.26200`, Build `26200`, 64-bit), 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz (`4C/8T`), `15.69 GB` RAM, `WD PC SN5000S SDEPMSJ-512G-1101` NVMe SSD (NTFS, `150.2 GB` free / `476.0 GB`), `1536×864 @ 96 DPI (100%)` display, MSVC `19.44.35229` (`x64`), CMake `3.31.6-msvc6`, Ninja `1.12.1`, Qt `6.8.2`, SQLite `3.47.2`, ONNX Runtime `1.20.20241119.10.5c1b7cc`, PDFium (`chromium/8152`, BSD-3-Clause), Microsoft Edge `157.0.4341.46`.
 
-### P1 Blocker Fixes Verified in v0.5.1
+### Major Capabilities & Fixes Verified
 
-1. **`DEF-01` (Security & Binary Hygiene — RESOLVED IN WORKING TREE/HEAD):** Removed `--capture-screenshots`, `--measure-startup`, `clearAllFiles()` CLI invocation, and all hardcoded developer paths from production [src/main.cpp](src/main.cpp) (relocated into opt-in developer utility [tools/capture_screenshots.cpp](tools/capture_screenshots.cpp) disabled by default via `LUMEN_BUILD_DEV_TOOLS=OFF`). Verified `Lumen.exe` (`2,109,440 B`, `v0.5.1.0`) contains zero developer path literals or dangerous debug switches. Removed `packaging/certs/UshaLabs.pfx` and `UshaLabs.cer` from Git index/HEAD, removed hardcoded fallback paths & plaintext passwords from [packaging/build_msix.ps1](packaging/build_msix.ps1) and [packaging/build_setup.ps1](packaging/build_setup.ps1), and added secret/certificate exclusions to [.gitignore](.gitignore). *(Git history rewrite / force-push to purge historical commit `05bc8da` paused pending explicit owner authorization.)*
-2. **`DEF-02` (Real-World PDF Extraction — RESOLVED):** Integrated native Chromium **PDFium** ([src/extraction/PdfiumBackend.h](src/extraction/PdfiumBackend.h), [src/extraction/PdfiumBackend.cpp](src/extraction/PdfiumBackend.cpp), dynamically loaded `pdfium.dll` with mutex serialization and bounded page/character caps) into [DocumentExtractor::extractPdfBytes](src/extraction/DocumentExtractor.cpp), and updated [DocumentExtractor::buildValidPdfBytes](src/extraction/DocumentExtractor.cpp) to emit ISO-compliant font/resource/`xref` PDFs. Real multi-page Chromium/Edge headless PDFs (3 pages `18.10 ms` and 25 pages `23.55 ms`), Unicode (`Café`, `日本語`, `Ελληνικά`, `Кириллица`), tables, multi-column text, exact page attribution, `80/80` multi-threaded parses, and synthetic/encrypted/corrupt/scanned PDFs all passed.
-3. **`DEF-03` (Live Directory Rename Indexing — RESOLVED):** Added cross-buffer `OLD_NAME`/`NEW_NAME` pairing + overflow rescan signaling in [DirectoryWatcher](src/indexing/DirectoryWatcher.cpp), collision-safe/case-aware Unicode-offset subtree updates in [DatabaseManager::renamePath](src/database/DatabaseManager.cpp), and pending-upsert flushing + targeted `reconcileDirectorySubtree()` in [FileIndexer](src/indexing/FileIndexer.cpp). Verified **107/107** automated populated, nested, 15-step rapid chain, case-only, and offline/restart directory rename scenarios with **`0` missing, `0` stale results, `PRAGMA integrity_check = ok`** (`P50 = 26.72 ms`, `P95 = 45.67 ms`), and live watcher rename in `3.64 ms`.
+1. **`DEF-01` (Security & Binary Hygiene — RESOLVED IN WORKING TREE/HEAD):** Removed `--capture-screenshots`, `--measure-startup`, `clearAllFiles()` CLI invocation, and hardcoded developer paths from production [src/main.cpp](src/main.cpp) (isolated into opt-in dev utility [tools/capture_screenshots.cpp](tools/capture_screenshots.cpp), `LUMEN_BUILD_DEV_TOOLS=OFF`). Post-final-edit `Lumen.exe` (`2,196,992 B`, `v0.5.1.0`) PE audit confirmed zero developer path literals (`<USER_PROFILE>`), zero `--capture-screenshots`/`UshaLabs.pfx` strings, and zero network/debug DLL imports. *(Historical commit `05bc8da` `.pfx` purge in Git history awaits explicit owner authorization.)*
+2. **`DEF-02` (Real-World PDF Extraction — RESOLVED & RE-VERIFIED):** Native Chromium **PDFium** ([PdfiumBackend.h](src/extraction/PdfiumBackend.h), [PdfiumBackend.cpp](src/extraction/PdfiumBackend.cpp)) verified post-Whole-PC edits on both live headless Microsoft Edge `157.0.4341.46` 2-page PDF (`pages=2, chars=229, extract_ms=281.26 ms`, Page 2 `matchedPage=2`) and `250 × 3p` multi-page compressed PDFs (`5.20 ms/doc`, `P95 = 14.41 ms` FTS5).
+3. **`DEF-03` (Live & Offline Directory Rename Indexing — RESOLVED & RE-VERIFIED WITH IOCP + `v6` `folders_fts`):** Verified **150 automated directory renames** (`100` rapid live populated/nested renames + `30` rapid multi-hop chain renames settling in `1,085 ms` via Win32 IOCP + `20` offline restart renames via `FileIndexer::runScanAndReconcile`), confirming **`0` missing, `0` stale results** across SQLite `files`, `files_fts`, and `folders_fts`. Uncovered and fixed a synchronous reuse bug where calling `FileIndexer::runScanAndReconcile()` after `FileIndexer::stop()` aborted immediately on stale `m_cancelRequested`.
+4. **2-Tier Whole-PC Indexing Architecture (NEW — IMPLEMENTED & VERIFIED):**
+   - **Tier 1 (Files & Folders — Whole PC):** [IndexingPolicy](src/indexing/IndexingPolicy.cpp) scans all fixed internal drives (`DRIVE_FIXED`: `C:\`, `D:\`, etc.) and Start Menu folders including `C:\Program Files`, `C:\Program Files (x86)`, `C:\Qt`, `C:\xampp` while skipping OS/dev/cache/credential junk (`C:\Windows`, `C:\ProgramData` [except Start Menu], `AppData`, hidden dot-dirs like `.git`/`.gradle`/`.vscode`/`.cache`, `node_modules`, `build`, `Temp`, `Cache`/`ShaderCache`/`GPUCache`, `pagefile.sys`/`hiberfil.sys`/`swapfile.sys`, `NTUSER.DAT*`, credentials). Verified on live host: **`151,303` items (`17,417` dirs) crawled in `37.11 s`**, **`25.27 MB` peak WS**, **`73.30 MB` DB**, and **`steam` resolves `C:\Program Files (x86)\Steam` (`0.34 ms`) + `steam.exe` (`1.54 ms`)**.
+   - **Tier 2 (Content & Semantic AI — Strictly Scoped):** Content FTS (`document_content` / `document_fts`) and MiniLM-L6-v2 embeddings (`document_chunks`) are restricted strictly to user `watchedFolders` (`Documents`, `Downloads`, `Desktop`, `Pictures`, `Videos`, `Music` + user additions in [SettingsDialog](src/ui/Settings/SettingsDialog.cpp)). Verified zero out-of-scope AI rows under `C:\Program Files`, `C:\Qt`, `C:\xampp`, and simulated third-party PDFs, plus verified automatic pruning via [`DatabaseManager::pruneContentAndSemanticOutsideRoots`](src/database/DatabaseManager.cpp).
+5. **Win32 IOCP Multi-Target Live Watcher + Partitioned Memory-Bounded Reconciliation (NEW — VERIFIED):** Replaced `WaitForMultipleObjects` (`63`-handle cap) with `CreateIoCompletionPort` / `GetQueuedCompletionStatus` ([DirectoryWatcher](src/indexing/DirectoryWatcher.cpp)) using shallow (`watchSubtree=false`) root watches + dynamic subtree auto-attach + deep watches, achieving **`0.00649%` CPU and `4.75 MB` WS (`30.19 MB` Priv) over a 30s live whole-PC IOCP idle window**, plus **`275.04 ms` offline partitioned subtree cleanup** on a `40,080`-item physical dataset.
+6. **Million-Row Query Scalability — SQLite Schema `v5` + `v6` (`folders_fts`) (NEW — VERIFIED):** Composite `(is_dir, name COLLATE NOCASE)` index (`v5`), dedicated trigger-maintained `folders_fts` trigram virtual table (`v6`), split `runExactPass`, and removing a `folders_fts` subquery-flattening `ORDER BY LENGTH(path)` scan cut 1,000,000-row search latency from `>1.1 s` (pre-v5) and `241.5 ms` P95 (pre-flatten fix) down to **`P50 = 16.44 ms`, `P95 = 25.12 ms`, `Max = 31.22 ms` (`WS = 29.38 MB`, `DB = 364.00 MB`)**.
 
-### Core Engineering Strengths & Remaining Limitations
+### Diagnosis of Prior 3-Hour QA Hang (`task-3146`) & Resolution
 
-- **Verified Performance & Stability (`v0.5.1`):** `0.000%` controlled 2-minute idle CPU (`0 ms / 120.022 s`, `41.04 MB` WS), `5.89 s` 100k file indexing (`17,005 files/sec`, `P95 = 32.70 ms`), `P95 = 2.79 ms` full-text search across 1,000 docs (with live PDFium parsing), `Recall@5/10 = 1.0` & `MRR@10 = 1.0` semantic quality, `1,000` leak-free UI stress cycles, and `4.42 s` silent isolated NSIS `v0.5.1` install/uninstall.
-- **Remaining P2/P3 & Unverified Gaps:** P2/P3 defects (`DEF-04` through `DEF-14`, including unsigned Release binaries triggering SmartScreen, `>260`-char NTFS traversal blind spot, multi-token folder+filename search, DOCX headers, linear `O(N)` vector scan above ~55k chunks, and `live_created_id_ed25519` prefix filter gap), physical multi-DPI/multi-monitor/Word-LO/clean-VM checks, and optional Git history rewrite for compromised `UshaLabs.pfx` remain open.
+Earlier during development testing (`task-3146`, stopped after >3 hours at `12:47:18` inside `TEST B`), the QA executable hung indefinitely right after `TEST B`'s live query printout due to two issues fixed in the current codebase:
+1. **Shutdown Deadlock (`DirectoryWatcher::stopWatching()`):** Cancelling overlapped IOCP `ReadDirectoryChangesW` handles previously called blocking `GetOverlappedResult(..., TRUE)` when `OVERLAPPED::hEvent == nullptr`; because Win32 IOCP handles deliver completions to the completion port rather than signaling an `hEvent`, that call blocked permanently. Fixed with `CancelIoEx` + `CloseHandle` + a bounded `300 ms` `GetQueuedCompletionStatus` drain loop ([src/indexing/DirectoryWatcher.cpp](src/indexing/DirectoryWatcher.cpp)).
+2. **Pre-Optimization Full-Scan Latency (`folders_ms = 101.61 ms`, `files_ms = 226.79 ms` in `task-3146.log`):** Resolved via split exact queries (`idx_files_name`), `v5` composite `idx_files_dir_name`, and `v6` `folders_fts` (`folders_ms` dropped `299×` to **`0.34 ms`**, `files_ms` dropped `147×` to **`1.54 ms`** on `151,303` live items). Post-fix QA suites finish completely without hanging (`qa_wholepc_scale`: full cold scan + 250 AI docs + 30s idle + 100k–1M stress + 40k physical tests completed cleanly with `exit=0`; `qa_v052_full_checks`: completed cleanly with `exit=0`).
 
 ---
 
@@ -35,289 +41,219 @@
 
 ### Actual Technology Stack
 
-| Subsystem | Inspected Implementation (`v0.5.1`) |
+| Subsystem | Inspected Implementation (Current Working Tree) |
 |---|---|
-| **Language & Build** | C++20 (`/std:c++20 /W4 /MP /utf-8 /permissive-`), MSVC `v143` toolset (`19.44.35229.0`), CMake + Ninja ([CMakeLists.txt](CMakeLists.txt)) |
-| **UI & Desktop Shell** | Qt `6.8.2` (`Qt6Core`, `Qt6Gui`, `Qt6Widgets`, shared DLL deployment via `windeployqt`) + Win32 integration in [src/platform/windows/DesktopIntegration.cpp](src/platform/windows/DesktopIntegration.cpp) |
-| **Database & FTS** | Amalgamated SQLite `3.47.2` ([third_party/sqlite3/sqlite3.c](third_party/sqlite3/sqlite3.c)) with `SQLITE_ENABLE_FTS5=1`, `SQLITE_THREADSAFE=2`, `SQLITE_OMIT_LOAD_EXTENSION=1`; WAL mode, FTS5 `trigram` (`files_fts`) + `unicode61` (`document_fts`) |
-| **PDF & Document Extraction** | Dynamic runtime `LoadLibraryW("pdfium.dll")` (`chromium/8152`, BSD-3-Clause/MIT) in [PdfiumBackend](src/extraction/PdfiumBackend.cpp) for modern PDFs (`/ObjStm`, `/ToUnicode` CMaps, Flate/LZW, page text); custom RFC 1950/1951 Inflate ([DeflateCodec](src/extraction/DeflateCodec.cpp)) + OOXML/CSV/tokenizer/media parsers ([DocumentExtractor](src/extraction/DocumentExtractor.cpp), [EnterpriseExtractors](src/extraction/EnterpriseExtractors.cpp)) |
-| **Semantic AI** | Dynamic `LoadLibraryW("onnxruntime.dll")` (`1.20.20241119.10.5c1b7cc`, API `v20`), C++ WordPiece tokenizer ([WordPieceTokenizer](src/semantic/WordPieceTokenizer.cpp)), `all-MiniLM-L6-v2` INT8 quantized (`22,972,370 B`), linear SQLite BLOB cosine scan |
-| **Filesystem Monitoring** | Initial traversal via Win32 `FindFirstFileExW`; real-time monitoring via overlapped Win32 `ReadDirectoryChangesW` with cross-buffer rename pairing, overflow rescan signaling, and targeted subtree reconciliation ([DirectoryWatcher](src/indexing/DirectoryWatcher.cpp), [FileIndexer](src/indexing/FileIndexer.cpp)) |
-| **Packaging** | NSIS `3.12` per-user installer ([Lumen.nsi](packaging/Lumen.nsi), [build_setup.ps1](packaging/build_setup.ps1)), portable `.zip`, unsigned experimental MSIX script ([build_msix.ps1](packaging/build_msix.ps1)) |
+| **Language & Build** | C++20 (`/std:c++20 /W4 /MP /utf-8 /permissive-`), MSVC `v143` toolset (`19.44.35229`), CMake `3.31.6-msvc6` + Ninja ([CMakeLists.txt](CMakeLists.txt)) |
+| **UI & Desktop Shell** | Qt `6.8.2` (`Qt6Core`, `Qt6Gui`, `Qt6Widgets`) + Win32 logon Task Scheduler (`\UshaLabs\Lumen`), `StartupApproved\Run`, tray recovery (`TaskbarCreated`), and Progman/WorkerW desktop Z-order ([DesktopIntegration.cpp](src/platform/windows/DesktopIntegration.cpp), [SettingsDialog.cpp](src/ui/Settings/SettingsDialog.cpp)) |
+| **Database & FTS** | Amalgamated SQLite `3.47.2` ([sqlite3.c](third_party/sqlite3/sqlite3.c)) with `SQLITE_ENABLE_FTS5=1`, WAL mode (`cache_size = -4096`), **Schema `v6`**: `files`, `idx_files_name`, `idx_files_dir_name`, `files_fts` (trigram), **`folders_fts` (trigram, trigger-maintained on `is_dir = 1`)**, `document_content`, `document_fts` (`unicode61`), `document_chunks` |
+| **PDF & Document Extraction** | Dynamic runtime `LoadLibraryW("pdfium.dll")` (`chromium/8152`, BSD-3-Clause) in [PdfiumBackend](src/extraction/PdfiumBackend.cpp); custom RFC 1950/1951 Inflate ([DeflateCodec](src/extraction/DeflateCodec.cpp)) + OOXML/CSV/code/media parsers ([DocumentExtractor](src/extraction/DocumentExtractor.cpp), [EnterpriseExtractors](src/extraction/EnterpriseExtractors.cpp)) |
+| **Semantic AI** | Dynamic `LoadLibraryW("onnxruntime.dll")` (`1.20.20241119.10.5c1b7cc`), C++ WordPiece tokenizer ([WordPieceTokenizer](src/semantic/WordPieceTokenizer.cpp)), `all-MiniLM-L6-v2` INT8 quantized (`384-D`), scoped exclusively to `watchedFolders` |
+| **Whole-PC Crawl & Live IOCP** | Partitioned memory-bounded NTFS crawl ([FileIndexer::scanSubtreeBounded](src/indexing/FileIndexer.cpp)), centralized policy ([IndexingPolicy](src/indexing/IndexingPolicy.cpp)), Win32 IOCP multi-target watcher (`CreateIoCompletionPort`, `128 KB` buffers, dynamic root-child attach, `15 s` overflow cooldown) ([DirectoryWatcher](src/indexing/DirectoryWatcher.cpp)) |
+| **Settings & Migration** | `SettingsManager` JSON **Schema `v3`**: adds `indexing.indexWholePc = true` and automatically migrates legacy `v2` ignore blacklists so `"Windows"`, `"Program Files"`, `"Program Files (x86)"` are handled accurately by path policy ([SettingsManager.cpp](src/core/SettingsManager.cpp)) |
 
-### Main Subsystems & Feature Reality Check
+### Feature Reality Check
 
-| Feature / Claim ([README.md](README.md)) | Source Inspection & Runtime Verification (`v0.5.1`) | Status vs. Docs |
+| Feature / Requirement | Verified Implementation Status | Status |
 |---|---|---|
-| **100% Offline, Zero Network Dependencies** | Zero `WS2_32.dll`, `WINHTTP.dll`, `WININET.dll`, or `Qt6Network.dll` imports in `Lumen.exe`, `onnxruntime.dll`, or `pdfium.dll`; zero HTTP client code in `src/` | Verified statically & via PE IAT |
-| **Tray + Borderless Pink Icon, Never on Taskbar** | `WS_EX_TOOLWINDOW = 1`, `WS_EX_APPWINDOW = 0`, `HWND_BOTTOM` idle Z-order, `TaskbarCreated` recovery, tray shutdown cleanup | Verified via HWND styles & runtime |
-| **Progressive Slide-Out (`56×56` → `488 px` → `908 px`)** | Smooth animation across all 6 states; results open with `hasSelection = 0` at `506 px` host (`488 px` card) and expand to `926 px` (`908 px` card) on selection | Verified at runtime |
-| **Find Any File Regardless of Size** | 64-bit `qint64` size (`5 GiB` sparse `.iso` indexed cleanly); `>260`-char deep paths fail initial scan (`DEF-04`) | Verified (`>4 GiB` passes); `DEF-04` P2 remains |
-| **5-Tier Folder Hierarchy** | Strict ordering Pinned → Desktop (`tier=0`) → Drive/watched root (`tier=2, depth=0`) → Depth `1..N` ascending | Verified |
-| **PDF & Multi-Format Content Extraction** | Real Chromium/Edge PDFs (`/ObjStm` + CMap), Unicode/multi-column/table PDFs, TXT/MD, DOCX body, XLSX/XLSM/CSV/TSV, lexical code tokens, media metadata | **PDF fixed (`DEF-02`)**; `.doc`/`.xls`/`.pptx` & DOCX headers unsupported |
-| **Content / Semantic Index Caps** | Hardcoded default caps: `maxContentIndexedFiles = 5000`, `maxSemanticFiles = 5000`, `maxDocumentSizeMb = 10` | Undocumented in README (`DEF-08` P2) |
-| **Dark Theme Support** | `ThemeTokens::get(bool)` ignores argument (`Theme.cpp`); no Settings toggle | Stubbed only (`DEF-13` P3, not claimed in README) |
+| **Whole-PC File & Folder Search (`C:\`, `D:\`, Program Files, Start Menu)** | Crawls all `DRIVE_FIXED` drives + Start Menu; excludes OS/dev/cache/swap/hive/credential junk; live `steam` query resolves `C:\Program Files (x86)\Steam` + `steam.exe` | **PASS** |
+| **AI Strictly Scoped to User Library Folders** | Content FTS & MiniLM vectors index only `watchedFolders`; verified 0 chunks/content rows from `Program Files`, `Qt`, `xampp`, and external vendor files; auto-prunes removed roots | **PASS** |
+| **Auto-Discover New Folders & Apps Live Anywhere on PC** | IOCP shallow watches on drive roots / user homes emit `directorySubtreeAdded` -> reconcile new folder + attach deep watch dynamically (`NewSteamInstall\steam_new.exe` verified) | **PASS** |
+| **100% Offline, Zero Network Dependencies** | `dumpbin /imports` on `Lumen.exe` confirms zero `WS2_32.dll`, `WINHTTP.dll`, `WININET.dll`, or `Qt6Network.dll` imports | **PASS** |
+| **Logon Startup, Persistent Tray & Desktop Z-Order** | Default `startWithWindows = true`, Windows Task Scheduler `\UshaLabs\Lumen`, close-to-tray Alt+F4 guard, `WS_EX_TOOLWINDOW`, `TaskbarCreated` recovery | **PASS** |
+| **Settings UI Whole-PC Toggle & Live Stats** | [SettingsDialog](src/ui/Settings/SettingsDialog.cpp) checkbox (`Index files & folders across all PC drives`), `"Content & Semantic AI folders"` caption, live DB counts verified | **PASS** |
+| **Clean Build, NSIS Setup & Portable ZIP Packages** | Clean Ninja Release build (`48/48`) repackaged via [build_setup.ps1](packaging/build_setup.ps1) (`29.29 MB` Setup + `35.05 MB` ZIP); isolated `/ISOLATEDTEST /S` install (`29` files) & uninstall (`0` leftovers) passed | **PASS** *(Unsigned `DEF-10`)* |
 
 ---
 
 ## 3. Test Environment
 
-| Component | Measured / Verified Value |
+| Component | Measured Value (`2026-11-11 16:14 +05:00`) |
 |---|---|
-| **Operating System** | Microsoft Windows 11 Pro (`Build 26200`, 64-bit / x64) |
-| **Processor** | 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz (`4` physical cores, `8` logical processors) |
+| **Operating System** | Microsoft Windows 11 Pro (`Version 10.0.26200`, Build `26200`, x64) |
+| **Processor** | 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz (`4` cores / `8` logical processors) |
 | **Physical RAM** | `15.69 GB` |
-| **Primary Storage** | `WD PC SN5000S SDEPMSJ-512G-1101` (NVMe SSD, NTFS volume `C:`, `475.96 GB` total) |
-| **Display Configuration** | `1` monitor, `1536×864` resolution (`1536×816` working area), `120 DPI` (`125%` scaling) |
-| **Compiler & Build Tools** | MSVC `19.44.35229.0` (`cl.exe` x64, VS 2022 BuildTools `17.14.41`), `CMake 3.31.6-msvc6`, `Ninja 1.12.1` |
-| **Runtime Libraries** | `Qt 6.8.2` (`msvc2022_64`), `SQLite 3.47.2` (`3047002`), `ONNX Runtime 1.20.20241119.10.5c1b7cc`, `PDFium chromium/8152` (`7,830,016 B`), `all-MiniLM-L6-v2` (`22,972,370 B` + `231,508 B` vocab), `NSIS v3.12` |
+| **Storage & Volume `C:`** | `WD PC SN5000S SDEPMSJ-512G-1101` (NVMe SSD), NTFS, `150.2 GB` free / `476.0 GB` total |
+| **Display Configuration** | `1536×864 @ 96 DPI (100%)` |
+| **Compiler & Build Tools** | MSVC `19.44.35229` (`x64`), `CMake 3.31.6-msvc6`, Ninja |
+| **Qt / Database / AI / PDF** | Qt `6.8.2` (`msvc2022_64`), SQLite `3.47.2` (amalgamated, FTS5 enabled), ONNX Runtime `1.20.20241119.10.5c1b7cc`, PDFium (`chromium/8152`), `msedge.exe 157.0.4341.46` |
 
-### Methodology & Environmental Limitations
+All QA suites ran inside isolated temporary directories (`QTemporaryDir`, `AppPaths::setAppDataRootOverride()`) leaving personal `%LOCALAPPDATA%\UshaLabs\Lumen`, user files, and Task Scheduler (`\UshaLabs\Lumen`) completely untouched (the Settings UI smoke check avoided invoking OS Task Scheduler writes).
 
-- All tests ran in isolated temporary directories (`QTemporaryDir`, `AppPaths::setAppDataRootOverride()`) using clean out-of-tree Release builds. User files, personal index (`<LOCAL_APPDATA>\UshaLabs\Lumen`), and the running desktop tray instance remained untouched.
-- **Unverified Hardware/Tool Environments:** `100%` / `150%` scaling, `1920×1080` / `1366×768` resolutions, multi-monitor / primary-monitor switches (`NOT TESTED`); MS Word & LibreOffice native PDFs (`BLOCKED` — neither installed); clean non-dev VM without Qt/VS installed (`NOT TESTED`); `10`/`30`-minute idle endurance (`NOT TESTED`); live packet-capture monitoring (`NOT TESTED`).
+### Unverified / Not Re-Run Environments
 
----
-
-## 4. Build & Packaging Results
-
-Reproducible clean out-of-tree Release build for `v0.5.1`:
-
-```powershell
-cmake -S <REPO_ROOT> -B <TEMP_QA_ROOT>\build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/Qt/6.8.2/msvc2022_64
-cmake --build <TEMP_QA_ROOT>\build --config Release
-```
-
-| Metric | v0.5.0 Baseline | v0.5.1 Verified Build |
-|---|---|---|
-| **CMake Config + Build** | `6.0 + 0.3 s`, `78.6 s` (`46` steps) | `7.0 + 0.4 s`, `103.56 s` (`47` steps, incl. PDFium deploy) |
-| **Compiler Warnings / Errors** | `2` (`C4310` `DeflateCodec.cpp`), `0` errors | `2` (`C4310` `DeflateCodec.cpp`), `0` errors (`0` new warnings) |
-| **Dev-Tools Opt-In Build (`LUMEN_BUILD_DEV_TOOLS=ON`)** | Mixed into `Lumen.exe` | Builds separate `capture_screenshots.exe` cleanly; excluded from `Lumen.exe` |
-| **`Lumen.exe` Size & Version** | `2,102,272 B` (`0.5.0.0`) | `2,109,440 B` (`FileVersion 0.5.1.0`, `ProductVersion 0.5.1.0`) |
-| **Benchmark Executables** | `phase1: 2,072,576 B` · `phase2: 2,064,896 B` · `phase3: 2,051,072 B` | `phase1: 2,095,104 B` · `phase2: 2,087,936 B` · `phase3: 2,074,624 B` |
-| **Staged NSIS Deploy Size** | `24` files, `59.48 MB` | `26` files (adds `pdfium.dll` + `LICENSE.pdfium.txt`), `~67.0 MB` staged |
-| **NSIS Installer / Portable ZIP (`v0.5.1`)** | `26.42 MB` Setup / `31.30 MB` ZIP | **`29.26 MB` Setup** / **`35.01 MB` Portable ZIP** (`build_setup.ps1`) |
-| **PE Imports (`dumpbin /dependents Lumen.exe`)** | Zero network / debug DLLs | Identical: `Qt6{Widgets,Gui,Core}.dll`, Win32 system DLLs, VC140 CRT; zero network/debug DLLs |
+- Physical `125%` / `150%` multi-monitor switching, MS Word / LibreOffice PDFs (`BLOCKED` — not installed), clean non-dev Windows VM without VS/Qt, and `10`/`30`-minute endurance runs remain `NOT TESTED`.
+- From the earlier `v0.5.1` baseline (`2026-11-11 00:56 +05:00`): the `1,000`-cycle interactive DesktopSearchBar animation loop, `120 s` GUI idle window, `34`-case extended extraction matrix, and `100k`-chunk brute-force semantic scan were **not re-executed** after the Whole-PC changes (repackaged NSIS isolated install/uninstall was re-verified on `2026-11-11 17:18 +05:00`).
 
 ---
 
-## 5. GUI & Desktop Integration Results (`v0.5.1`)
+## 4. Build & Binary Hygiene Results
 
-| Verification Area | v0.5.1 Measured Result | Status |
-|---|---|---|
-| **Win32 Tray & Taskbar Exclusion** | `WS_EX_TOOLWINDOW = 1`, `WS_EX_APPWINDOW = 0`, `WS_EX_TOPMOST` toggles off/on; `TaskbarCreated` handled | **PASS** |
-| **Startup Latency (`UI_STARTUP_SHOW_MS`)** | `29.65 ms` (v0.5.1 isolated UI init+show) | **PASS** |
-| **Progressive 6-State Transitions** | State A `74×74` (`29.64 MB` WS) → State B `506×74` (`35.00 MB`) → State C `506×614` (`hasSelection=0`, `54.41 MB`) → State D `926×614` (`hasSelection=1`, `59.02 MB`) → State E `926→506` → State F `74×74` (`1.17 MB` after OS trim) | **PASS** |
-| **`120` Transition Loops** | `0` failures (`42.50 MB` WS, `12.00 MB` Priv, `366` handles) | **PASS** |
-| **Position Persistence & Hotkey** | `(140, 120)` restored (`slidesLeft=0`); `Ctrl+Alt+F9` registers (`reg=1`); contended `Ctrl+Alt+Space` fails gracefully | **PASS** |
-| **Keyboard, Mouse Scroll, Context Menu, `CF_HDROP`** | `Down/Up`, `Tab/Shift+Tab` cycle all 5 modes, `Enter` activates (`activated=1`), `Ctrl+C` (`cf_hdrop=1`), `Ctrl+Shift+C`, `Ctrl+R` (`src='AuditSolarNotes.txt', count=2`), `Ctrl+P`, mouse scroll (`0→300`), `8`-item context menu. (`Ctrl+D` still clears selection on async refresh: `DEF-11` P3) | **PARTIAL** (`DEF-11`) |
-| **Inspector PDF Page & Content Metadata** | `AuditPdfReport.pdf` via PDFium shows `matchedPage = 3` and extracted snippet cleanly | **PASS** |
-| **DPI / Multi-Monitor / Themes** | `125%` (`1536×864`) verified; `100%`/`150%`/multi-mon `NOT TESTED`; Dark theme stubbed (`DEF-13`) | **PARTIAL** |
+Release build invoked via clean out-of-tree VS 2022 BuildTools `vcvars64.bat` + CMake/Ninja (`-DLUMEN_BUILD_DEV_TOOLS=OFF`, `--config Release`, `/std:c++20 /W4 /MP /utf-8 /permissive-`):
 
----
-
-## 6. Filename & Folder Indexing Results (`v0.5.1`)
-
-### Multi-Scale Physical NTFS Indexing & Query Latency (`qa_suite_indexing` v0.5.1)
-
-| Target Scale | Enumerated / Upserted (`Dirs`) | Scan Time (`files/sec`) | Avg CPU | Peak WS | DB Size | Search P50 / P95 / P99 / Max (`200` queries) |
-|---|---|---|---|---|---|---|
-| **10k** | `9,807` (`108` dirs) | `449.23 ms` (`21,830.6/s`) | `10.43%` | `23.47 MB` | `6.38 MB` | `1.74` / `2.60` / `3.33` / `4.36 ms` |
-| **50k** | `48,106` (`107` dirs) | `2,677.23 ms` (`17,968.6/s`) | `11.96%` | `25.10 MB` | `27.82 MB` | `14.63` / `24.10` / `39.97` / `63.83 ms` |
-| **100k** | `96,106` (`107` dirs) | `6,213.43 ms` (`15,467.5/s`) | `11.44%` | `27.30 MB` | `51.34 MB` | `25.12` / **`32.04`** / `33.24` / `34.55 ms` |
-
-### `DEF-03` Live Directory Rename & Watcher Latency Verification (`v0.5.1`)
-
-- **Live Single-File/Folder Operations (`qa_suite_indexing` v0.5.1):** `new_file = 7.60 ms`, `rename_file = 2.19 ms`, `move_between_watched_roots = 3.82 ms`, `move_outside_watched = 1.60 ms`, `delete_file = 17.33 ms`, `new_folder_with_child = 10.17 ms`, **`rename_folder_checks_child_paths = 3.64 ms (ok=1, verified=1)`** *(was `5,010.93 ms` timeout in v0.5.0)*, `delete_folder_with_child = 1.87 ms`.
-- **107-Trial Directory Rename Regression Suite (`qa_v051_verify`):**
-  - `100/100` populated & multi-level nested folder renames (standard names, spaces + dots `v1.0 → v2.5`, UTF-8 `Café`): **all `100` verified zero missing files/folders, zero stale DB paths (`p50 = 26.72 ms, p95 = 45.67 ms`)**.
-  - `15`-step rapid consecutive chain rename (`ChainStep_00 → ... → ChainStep_15`): **converged (`ok = 1`), zero deadlocks, zero stale paths, child FTS5 content preserved (`RapidChainUniqueContentMarker_9988`)**.
-  - Case-only NTFS rename (`CaseMixDir → caseMIXdir`): **passed (`ok = 1`)**.
-  - `5/5` offline/interrupted-indexing restart reconciliations (folders renamed + children mutated while `FileIndexer` stopped, followed by fresh `FileIndexer` restart scan): **`5/5` passed (`0` stale, `0` missing)**.
-  - Final SQLite consistency after all `107` scenarios: **`PRAGMA integrity_check = ok`**.
-- **Pre-Existing P2 Indexing Limitations (Unchanged by Choice):** `Quarterly Financial` multi-token folder+file miss (`DEF-05`), `>260`-char deep NTFS enumeration (`DEF-04`), and `live_created_id_ed25519` prefix match (`DEF-09`). Exact `.env`, `id_rsa`, `id_ed25519`, `*.key`, `*.pem`, `*.pfx` exclusions (`0` hits) and junction loops (`0` hits) pass.
+| Artifact / Check | Measured Result (`task-3387` / `task-3391` / Clean Rebuild `task-3426` & Packaging `task-3446`) |
+|---|---|
+| **Clean Release Compilation** | **PASS** — `48/48` steps, `0` errors, `2` pre-existing `C4310` warnings in `DeflateCodec.cpp` (`0` new warnings across all Whole-PC/`v6` files) |
+| **NSIS Setup & Portable ZIP (`build_setup.ps1`)** | **PASS** — `Lumen-v0.5.1-Setup-x64.exe` (`30,711,599 B` / `29.29 MB`), `Lumen-v0.5.1-windows-x64.zip` (`36,749,574 B` / `35.05 MB`), `SHA256SUMS.txt` generated locally (`dist/` & `releases/`); isolated `/ISOLATEDTEST /S` install (`16,271.09 ms`, `29` files incl. `Lumen.exe`, `pdfium.dll`, `onnxruntime.dll`, `model_quantized.onnx`) & uninstall (`0` leftovers, `exit=0`) passed |
+| **`Lumen.exe` Binary Metadata** | `2,196,992` bytes (`2.10 MB`), `FileVersion 0.5.1.0`, `ProductVersion 0.5.1.0` |
+| **Leaked String Audit (`Lumen.exe`)** | `Contains '--capture-screenshots': False`, `Contains 'UshaLabs.pfx': False`, `Contains '<USER_PROFILE>': False` |
+| **PE Import Table (`dumpbin /imports`)** | `Qt6Widgets.dll`, `Qt6Gui.dll`, `Qt6Core.dll`, Win32 (`USER32`, `SHELL32`, `ole32`, `OLEAUT32`, `ADVAPI32`, `KERNEL32`, `GDI32`), MSVC CRT (`MSVCP140`, `VCRUNTIME140*`, `api-ms-win-crt-*`); **zero network or debug CRT DLLs** |
 
 ---
 
-## 7. Document Extraction Results (`v0.5.1`)
+## 5. Desktop Shell, Startup & UI Integration Results
 
-### `DEF-02` PDFium Verification + `34`-Case Format Suite
-
-| Test Case | v0.5.0 Result | v0.5.1 Verified Result (`PDFium`) |
-|---|---|---|
-| **Edge Headless PDF (`3p`, 2-Column, Table, `Café`/`日本語`/`Ελληνικά`/`Кириллица`)** | `FAIL` (`0` chars) | **PASS** — `100,330 B`, `3` pages, `704` chars, `18.10 ms`, page attribution **`p1=1, p2=2, p3=3`**, table/col2/Unicode all `1` |
-| **Edge Headless PDF (`25p`, Large Real Browser Print)** | Not tested | **PASS** — `108,916 B`, `25` pages, `4,862` chars, `23.55 ms`, **`page25_resolved = 25`** |
-| **Edge Headless PDF (`qa_suite_extraction`, `2p`, `58,564 B`)** | `FAIL` (`0` chars) | **PASS** — `actualOk = 1, tokenFound = 1, pages = 2, chars = 344, ms = 18.43, resolvedPage = 2` |
-| **End-to-End Indexed Edge PDF Content Search (`FileSearchEngine`)** | `FAIL` (`0` hits) | **PASS** — Content query `"PageThreeFinalAuditMarker"` returned hits with **`matchedPage = 3`** |
-| **8-Thread Concurrent PDF Extraction (`8 × 10` docs)** | Not tested | **PASS** — **`80/80` succeeded (`fail = 0`)**, thread-safe mutex guard verified |
-| **Synthetic Flate `3p`, Plain `1p`, Large `120p` PDFs** | Passed toy parser only | **PASS** — Extracted with ISO `xref` generator (`120p`: `83,878` chars / `70.08 ms`, `SYN_120P`: `4,210` chars) |
-| **Password-Protected / Corrupt / Scanned PDFs** | Rejected cleanly | **PASS** — Graceful rejections (`"PDF is password-protected."`, `"Invalid or corrupted PDF document."`, `"No extractable text found in PDF."`) |
-| **MS Word & LibreOffice Native PDFs** | `BLOCKED` | **`BLOCKED`** (Word / LibreOffice not installed on test host) |
-| **Full `34`-Case Extraction Summary (`qa_suite_extraction`)** | `27` ok / `7` rej | **`28` succeeded / `6` rejected** (`P50 = 10.42 ms`, `P95 = 42.11 ms`); only `docx_header_check` (`DEF-06` P2) fails body-only DOCX expectation, plus `5` intentional security/corrupt/scanned rejections |
-
----
-
-## 8. Semantic AI Results (`v0.5.1`)
-
-Unchanged architecture verified clean against regressions (`qa_suite_semantic` v0.5.1):
-- **Model Validation & Lifecycle:** `cold_load = 126.46 ms`, `384-D` finite normalized vectors; 5 repeated unload/reload cycles stable (`0.25–0.26 MB` WS unloaded / `43.11–44.46 MB` WS loaded).
-- **Relevance (`160` Docs / `8` Domains / `24` Paraphrased Queries):** `251.66 chunks/sec`, **`Recall@5 = 1.0`, `Recall@10 = 1.0`, `Precision@5 = 1.0`, `MRR@10 = 1.0`**, **`P50 = 1.91 ms`, `P95 = 2.40 ms`**.
-- **Vector Scan Scalability (`O(N)` Linear Scan):** `1k`: `P50 2.27 ms / P95 3.00 ms`; `10k`: `P50 23.69 ms / P95 25.85 ms`; `50k`: `P50 117.79 ms / P95 137.08 ms`; **`100k`: `P50 226.00 ms / P95 262.42 ms` (`Max 292.60 ms`, DB `218.85 MB`)** — still exceeds `< 150 ms` at `100k` (`DEF-07` P2).
-
----
-
-## 9. Performance & Resource Benchmarks (`v0.5.1`)
-
-| Metric | Target | v0.5.1 Measured Result | Status |
+| Verification Check | Executed Suite | Measured Outcome | Status |
 |---|---|---|---|
-| **UI Startup to Visible Desktop Bar** | `< 500 ms` | **`29.65 ms`** (`qa_suite_remaining`) | **PASS** |
-| **Idle CPU (2-Minute Controlled UI Idle)** | `< 0.1%` | **`0.000%`** (`0 ms` CPU time over `120.022 s`, `qa_db_ui_stress`) | **PASS** |
-| **Idle Working Set RAM (2-Min Controlled)** | `< 120 MB` | **`41.04 MB` WS** (`12.60 MB` Priv, `342` Handles) | **PASS** |
-| **Filename Indexing (`100,100` rows, Phase 1)** | Fast background | **`5.89 s`** (`17,005 files/sec`, `11.35%` CPU, Peak `24.78 MB`, DB `53.25 MB`) | **PASS** |
-| **Filename Search Latency (`100k`, `200` queries)** | `< 50 ms` P95 | **Phase 1: `27.06 ms` P50 / `32.70 ms` P95** · **Physical NTFS: `25.12 ms` P50 / `32.04 ms` P95** | **PASS** |
-| **Full-Text Search Latency (`1,000` Docs w/ PDFium)** | `< 150 ms` P95 | **`1.65 ms` P50 / `2.79 ms` P95 / `6.95 ms` Max** (`phase2_benchmark`) | **PASS** |
-| **Semantic Search Latency (`250` – `10k` Chunks)** | `< 150 ms` P95 | `2.40 ms` (`160`), `4.09 ms` (`250`), `3.00 ms` (`1k`), `25.85 ms` (`10k`) | **PASS** |
-| **Semantic Search Latency (`100k` Chunks)** | `< 150 ms` P95 | **`262.42 ms` P95** (`DEF-07` P2 linear scan limit) | **FAIL (`100k` P2)** |
-| **Semantic Indexing Peak RAM (`250` Chunks)** | `< 350 MB` | **`61.07 MB` WS** (`0.25 MB` after `unloadModel()`) | **PASS** |
-| **`1,000`-Cycle UI Stress Endurance** | Zero leaks/crashes | `0` crashes, `46.54 MB` WS, `14.61 MB` final Priv, `367` Handles (`+15`) | **PASS** |
-| **`10` / `30`-Minute Idle Endurance** | `< 0.1%` | Not executed | **NOT TESTED** |
+| **Startup Default & JSON Precedence** | `verify_startup` | Missing `settings.json` defaults `startWithWindows = true`; explicit `false`/`true` overrides load cleanly | **PASS** |
+| **Win32 Task Scheduler Logon CRUD** | `verify_startup` | Isolated test task `Lumen_TestVerify_Tmp` registered w/ `--startup`, queried back cleanly, removed cleanly | **PASS** |
+| **Taskbar Exclusion, Close Guard & Rest Z-Order** | `verify_startup` | `WS_EX_TOOLWINDOW` set (`!= 0`), `WS_EX_APPWINDOW` unset (`== 0`), close without exit guard leaves bar visible, `desktopRestInsertAfter()` returns valid anchor `!= HWND_BOTTOM` | **PASS** |
+| **Tray Recovery (`TaskbarCreated`)** | `verify_startup` | `TrayController` initialized cleanly and survived simulated Explorer restart (`recreateTrayAfterExplorerRestart()`) | **PASS** |
+| **Settings Whole-PC Toggle & Persistence** | `qa_v052_full_checks` (`Test 4`) | `SettingsDialog` offscreen bind confirmed `"all PC drives"` checkbox tracks `indexWholePc` (`true -> false -> true`), caption `"Content & Semantic AI folders"` and `"Save Changes"` present, JSON round-trip persisted | **PASS** |
+| **Interactive 6-State `74↔506↔926 px` & `1,000` Cycles** | `v0.5.1` (`00:56`) baseline | `0` failures, `46.54 MB` final WS, `367` handles *(not re-run post-Whole-PC edits)* | **CARRIED (`v0.5.1`)** |
 
 ---
 
-## 10. Reliability & Stress Testing (`v0.5.1`)
+## 6. Whole-PC Crawling, Live IOCP & Multi-Scale Search Results
 
-- **Progressive Transitions (`120` cycles):** `0` failures (`42.50 MB` WS, `366` handles).
-- **GUI + Search + Mode Switch (`1,000` cycles):** Bounded plateau (`45.36 MB` at cycle 250 → `46.54 MB` at cycle 1000, final `367` handles vs baseline `352`).
-- **Directory Rename Chaos (`107` trials incl. `15`-step chain + offline restart):** `107/107` passed, zero deadlocks (`m_incrementalMutex` / `m_writeMutex`), `0` stale rows.
-- **Multi-Threaded PDFium (`80` concurrent extractions across `8` threads):** `80/80` passed with zero crashes or heap corruption.
-- **Process Termination Recovery:** `4,500` committed rows recovered post-`TerminateProcess`, `PRAGMA integrity_check = ok`.
+### Real Physical PC Whole-PC Crawl + Scoped AI + 30s Live IOCP Idle (`qa_wholepc_scale` `Test B`)
+
+| Metric | Measured Result (`task-3391`, Post-Final-Edit) |
+|---|---|
+| **Scan Roots Discovered** | `3` (`C:\`, `C:\ProgramData\Microsoft\Windows\Start Menu`, `<USER_PROFILE>\AppData\Roaming\Microsoft\Windows\Start Menu`) |
+| **Cold Whole-PC Crawl** | **`151,303` items** (`17,417` directories) in **`37,108.3 ms`** (`4,077.33 items/sec`), **`11.78%` avg CPU**, Peak WS **`25.27 MB`**, Private **`8.57 MB`**, DB **`73.30 MB`** |
+| **Exclusion Enforcement** | `C:\Windows\* = 0`, `*\AppData\Local\Temp\* = 0`, `<USER_PROFILE>\.gradle\* = 0`, `pagefile.sys`/`hiberfil.sys = 0` |
+| **Real App Lookup (`"steam"`)** | `All`: `20` hits in **`4.59 ms`** · `Folders`: **`0.34 ms`** (`C:\Program Files (x86)\Steam` found) · `Files`: **`1.54 ms`** (`steam.exe` found) |
+| **Warm Partitioned Rescan + Scoped `250`-Doc Content/Semantic** | Total **`38,422 ms`** (`content_docs=250` in `3,784.35 ms`; `sem_docs=250`, `523` chunks in `27,549.6 ms`), Cur WS **`2.45 MB`**, Peak WS **`101.98 MB`**, Private **`28.74 MB`** |
+| **AI Scoping Verification** | Out-of-scope `document_content` and `document_chunks` rows under `C:\Program Files*`, `C:\Qt\*`, `C:\xampp\*` = **`0`** |
+| **`30 s` Live Whole-PC IOCP Idle** | CPU **`0.00649%`**, Working Set **`4.75 MB`**, Private RAM **`30.19 MB`** |
+
+### Multi-Scale Filename & Folder Latency (`100k` to `1,000,000` Rows — `qa_wholepc_scale` `Test C`)
+
+Seeded with `20,000` noisy `steam_api_asset_*.dll` rows before exact `Steam`, `steam.exe`, and `Steam.lnk` targets plus balanced files (`95%`) and folders (`5%` — `5,000` folders per term at 1M rows) across 10 query terms (`200` queries rotating `All`, `Files`, `Folders` at each scale):
+
+| Dataset Scale | Cumulative Insert | DB Size | Process WS | `"steam"` All + Top-3 Verified | `"invoice"` (`All / Files / Folders`) | `200`-Query `P50 / P95 / P99 / Max` |
+|---|---|---|---|---|---|---|
+| **100,000 rows** | `8.35 s` | `40.10 MB` | `28.38 MB` | `9.55 ms` (PASS) | `6.33 / 1.15 / 2.21 ms` | `6.04 / 10.54 / 12.23 / 16.65 ms` |
+| **250,000 rows** | `25.58 s` | `94.12 MB` | `28.73 MB` | `16.50 ms` (PASS) | `19.75 / 4.09 / 19.42 ms` | `14.72 / 21.67 / 25.90 / 26.99 ms` |
+| **500,000 rows** | `54.27 s` | `183.85 MB` | `29.36 MB` | `21.19 ms` (PASS) | `24.32 / 3.64 / 19.32 ms` | `16.84 / 27.34 / 33.30 / 34.14 ms` |
+| **1,000,000 rows** | `109.79 s` | `364.00 MB` | `29.38 MB` | `21.16 ms` (PASS) | `21.44 / 3.53 / 23.17 ms` | **`16.44 / 25.12 / 27.39 / 31.22 ms`** |
+
+- **Key Optimization Finding:** Separating `folders_fts` (`v6`) initially hit a SQLite subquery-flattening trap from wrapping `LIMIT` inside `ORDER BY LENGTH(path) ASC`, causing `1M` P95 to hit `241.47 ms` (`steam_ms = 256.32 ms`). Removing that redundant outer `ORDER BY` in `runFtsPass` (since C++ `folderHierarchyCmp` sorts `candidateMap`) reduced `1,000,000`-row latency to **`25.12 ms` P95 (`16.44 ms` P50, `31.22 ms` Max)** at **`29.38 MB` Working Set**.
+
+### Partitioned Physical Reconciliation, Shallow Watch & Rename Regression (`Test D` & `qa_v052_full_checks` `Test 2`)
+
+- **40k Partitioned Physical Delete (`qa_wholepc_scale` `Test D`):** Indexed `40,080` physical files across `80` directories (`> 35,000` partition threshold) in `3,098.81 ms`; deleting `Bucket_42` (`501` items) offline removed all `Bucket_42` entries on second partitioned scan in **`275.04 ms`** (`filesDeleted = 1` top-level missing dir entry -> recursive subtree delete, verified `0` remaining DB rows).
+- **Dynamic Shallow-Watch Attach (`Test D`):** Creating `NewSteamInstall` under a shallow-watched parent (`watchSubtree=false`) emitted `directorySubtreeAdded`, dynamically armed deep watching, and captured subsequent `steam_new.exe` creation live.
+- **150 Populated/Nested Directory Renames Under IOCP + `folders_fts` (`qa_v052_full_checks` `Test 2`):**
+  - `100` rapid live directory renames (`ProjOrig_00..99 -> ProjRenamed_00..99`) + `30` consecutive rapid multi-hop chain renames (`ProjRenamed_00..09 -> ChainA -> ChainB -> ProjFinal_00..09`) settled via IOCP in **`1,085 ms`**.
+  - `20` additional offline renames (`ProjRenamed_80..99 -> ProjOffline_80..99`) reconciled cleanly via `FileIndexer::runScanAndReconcile()`.
+  - Final state: `400/400` DB rows intact, `0` stale `ProjOrig`/`ChainA`/`ChainB`/`ProjRenamed_99` entries, `0` missing files or folders across FTS5 `Files` and `Folders` queries.
+
+### Phase 1 Official Benchmark (`phase1_benchmark.exe`, Post-Final-Edit `task-3391`)
+
+| Metric | Target | Measured Result (`100,100` Physical NTFS Files, `101` Dirs) | Status |
+|---|---|---|---|
+| **Initial Scan Time & Rate** | Fast background | **`33.98 s`** (`2,946 files/sec`, `11.59%` avg CPU across 8 logical cores) | **PASS** |
+| **Database Index Size** | `< 100 MB` | **`58.10 MB`** (`60,923,904` bytes) | **PASS** |
+| **Working Set / Private Post-Idx** | Low footprint | **`21.74 MB` WS** (Peak `24.72 MB`), **`8.45 MB` Priv** | **PASS** |
+| **`200`-Query Search Latency** | `< 50 ms` P95 | Min `0.85 ms` · **`P50 7.45 ms`** · **`P95 17.28 ms`** · `P99 19.02 ms` · Max `21.12 ms` (`7,020` hits) | **PASS** |
+| **Incremental Watcher Ops** | Responsive | Add `345.29 ms` · Rename `3.70 ms` · Delete `1.77 ms` | **PASS** |
+| **`10 s` Post-Index Idle** | `< 0.1%` CPU | **`0.0000%` CPU**, **`28.68 MB` WS**, **`14.18 MB` Priv** | **PASS** |
+
+*(Note: `phase1_benchmark.exe` generates and scans 100,100 physical NTFS files inside a fresh `QTemporaryDir`; initial throughput varies with Windows Defender / NTFS metadata cache state.)*
 
 ---
 
-## 11. Database Integrity Results (`v0.5.1`)
+## 7. Document Extraction & Content Search Results
 
-- **Concurrency (`10k` inserts + `21` parallel read queries):** `integrity_pre = ok`, `after_clear = 0`, `integrity_post_clear = ok`.
-- **Hard Crash Recovery:** `4,500` rows survived `TerminateProcess`, `integrity = ok`.
-- **Schema Migration (`v1 → v4`):** Upgraded cleanly (`version = 4, has_is_dir = 1, rows_preserved = 1, integrity = ok`).
-- **Rename Subtree + FTS5 Integrity:** Verified `107/107` directory renames updated `files` + `files_fts` + preserved `document_content`/`document_chunks` linkage (`PRAGMA integrity_check = ok`).
+### Edge PDFium + Scoped AI Integration (`qa_v052_full_checks` `Test 3`, `task-3387`)
+
+- **Real Browser PDF (`msedge.exe 157.0.4341.46` Headless Print):** Generated 2-page PDF (`edge_telemetry_architecture.pdf`), extracted cleanly via `PdfiumBackend` (`pages=2, chars=229, extract_ms=281.26 ms`). Full-text `SearchMode::Content` matched Page 2 token `"HyperionVectorConsolidation"` with **`matchedPage = 2`** and non-empty contextual snippet.
+- **Tier-1 vs Tier-2 Isolation:** Out-of-scope Tier-1 file (`C:\Program Files\ThirdPartySuite\vendor_manual.pdf`) returned `1` hit in `SearchMode::Files` and **`0` rows** in `document_content` and `document_chunks`. Removing a watched folder's synthetic file via `pruneContentAndSemanticOutsideRoots()` cleanly pruned `1` stale content entry.
+
+### Phase 2 Official Benchmark (`phase2_benchmark.exe`, Post-Final-Edit `task-3391`)
+
+| Metric (`1,000` Docs: 250 TXT, 250 MD, 250 DOCX, 250 × 3p PDF) | Measured Result |
+|---|---|
+| **TXT Extraction (`250` docs)** | `358.21 ms` (`1.43 ms/doc`) |
+| **MD Extraction (`250` docs)** | `96.58 ms` (`0.39 ms/doc`) |
+| **DOCX Extraction (`250` docs)** | `124.26 ms` (`0.50 ms/doc`) |
+| **PDF Extraction (`250 × 3p` docs via PDFium)** | `1,300.46 ms` (`5.20 ms/doc`) |
+| **End-to-End Content Indexing + DB Growth** | `2,155.37 ms` total · **`1.11 MB` DB (`1.132 KB/doc`)** |
+| **Full-Text Search Latency (`30` queries, `1,500` hits)** | **`P50 9.06 ms`** · **`P95 14.41 ms`** (Target `< 150 ms`) · `Max 34.24 ms` |
+| **Process Memory** | **`22.25 MB` WS**, **`6.63 MB` Private** |
+
+---
+
+## 8. Semantic AI Results (`all-MiniLM-L6-v2` INT8 ONNX CPU)
+
+### Isolated Semantic + `unloadModel()` Verification (`qa_v052_full_checks` `Test 3`, `task-3387`)
+
+- Natural-language paraphrase query `"gathering sensor data pipelines and compressing neural vector embeddings"` ranked the Edge telemetry architecture PDF `#1` (`topSim = 0.532777`, `547.32 ms` including cold ONNX session load).
+- Calling `SemanticEmbeddingEngine::unloadModel()` unloaded the ONNX session cleanly (`isSessionLoaded() == false`) and reduced private process memory from **`49.21 MB -> 16.29 MB`**.
+
+### Phase 3 Official Benchmark (`phase3_benchmark.exe`, Post-Final-Edit `task-3391`)
+
+| Metric (`250` Multi-Domain Docs / Chunks) | Measured Result |
+|---|---|
+| **Lazy Model Load + First Inference** | `807.63 ms` |
+| **Batch Semantic Embedding (`250` chunks)** | `4,130.63 ms` (**`60.5 chunks/sec`**, `16.52 ms/chunk`) |
+| **Semantic Search Latency (`40` NL queries, `800` hits)** | **`P50 11.47 ms`** · **`P95 15.81 ms`** (Target `< 150 ms`) · `Max 40.40 ms` |
+| **Vector Storage Growth** | `500.00 KB` (`2,048.0 bytes/chunk`) |
+| **Memory Profile (`WS` / `Priv`)** | Pre-load: `14.20 / 2.69 MB` → Peak: **`60.33 MB WS`** (Target `< 350 MB`) → Post-`unloadModel()`: **`0.24 MB WS / 17.63 MB Priv`** |
+
+*(Prior `v0.5.1` scaling measurement on `100k` vectors remains valid: `O(N)` linear SQLite scan exceeds `150 ms` above ~55k vectors (`262.42 ms` P95 at 100k — `DEF-07` P2). Because Tier-2 Semantic AI is now strictly scoped to user Library folders with default `5,000`-file cap, real-world vector counts remain well within interactive sub-30ms bounds.)*
+
+---
+
+## 9. Database Integrity & Migration Results
+
+- **Settings JSON Migration (`v2 -> v3`, `Test A`):** Automatically migrated legacy `schemaVersion = 2` settings JSON by enabling `indexWholePc = true` and stripping `"Windows"`, `"Program Files"`, and `"Program Files (x86)"` from `ignoredDirectories` while preserving `"AppData"`, `".git"`, `"node_modules"`.
+- **SQLite Migration (`v4 -> v6`, `qa_v052_full_checks` `Test 1`):** Upgraded an authentic `v4` schema DB (`50` folders, `200` files, `schema_migrations` 1..4) cleanly to `schemaVersion() == 6`:
+  - Created composite `idx_files_dir_name` (`v5`).
+  - Created `folders_fts` FTS5 trigram virtual table + insert/delete/update triggers (`v6`) and backfilled exactly `50` folders (`0` file rows leaked into `folders_fts`).
+  - Verified `renamePath`, `upsertFile`, and `removeFileByPath` kept `folders_fts` synchronized (`PRAGMA integrity_check = ok`).
 - **Low Disk Space Conditions:** `NOT TESTED`.
 
 ---
 
-## 12. Security & Privacy Review (`v0.5.1`)
+## 10. Security, Privacy & Distribution Status
 
-| Security / Privacy Control | v0.5.1 Verification | Result |
+- **Offline Guarantee:** `Lumen.exe` (`2,196,992 B`, `v0.5.1.0`) imports zero networking DLLs.
+- **Credential & OS Hygiene in Whole-PC Index:** `IndexingPolicy` skips `C:\Windows`, `C:\ProgramData` (except Start Menu), `AppData`, hidden dot-dirs, `pagefile.sys`/`hiberfil.sys`/`swapfile.sys`, `NTUSER.DAT*`, and credential patterns (`.env*`, `id_rsa*`, `id_ed25519*`, `*.pem`, `*.key`, `*.pfx`). Verified zero leaks in live whole-PC `151,303`-item scan.
+- **NSIS Packaging:** Cleanly repackaged on `2026-11-11 17:18 +05:00` via [build_setup.ps1](packaging/build_setup.ps1) + NSIS `3.12` after deleting old `build/`, `dist/`, and `releases/` artifacts: `Lumen-v0.5.1-Setup-x64.exe` (`30,711,599 B` / `29.29 MB`, SHA256 `7d1a3036bee3bcecabf2981ee946fd3040ad7ad34a341ba3dfadd22e63ab3add`) and `Lumen-v0.5.1-windows-x64.zip` (`36,749,574 B` / `35.05 MB`, SHA256 `40236336969fee5b24a60cf52359e69d6038cd0eb9aac3923455a7085736d81e`). Isolated `/ISOLATEDTEST /S` install (`29` files in `16,271.09 ms`) and silent uninstall (`0` leftover files, `exit=0`) passed cleanly (`DEF-10` unsigned unless `$env:LUMEN_SIGNING_PFX` is supplied). Local packages remain excluded from Git tracking via `.gitignore`.
+- **Git History Exposure (`DEF-01`):** Historical commit `05bc8da` still retains legacy `packaging/certs/UshaLabs.pfx` in Git history until repository owner runs or approves history rewrite (`git filter-repo` + force-push).
+
+---
+
+## 11. Known Open P2/P3 Issues & Limitations
+
+| ID | Severity | Status & Scope Notes |
 |---|---|---|
-| **Release PE Binary Cleanliness (`DEF-01`)** | Verified `Lumen.exe`: `<USER_PROFILE> = False`, `--capture-screenshots = False`, `--measure-startup = False`, `clearAllFiles = False`, `<LEGACY_SIGNING_SECRET> = False`, zero telemetry/API strings | **PASS** |
-| **Offline Execution & Import Audit** | Zero network DLLs on `Lumen.exe`, `onnxruntime.dll`, and `pdfium.dll` (`KERNEL32`/`ADVAPI32`/`GDI32`/`USER32` only) | **PASS** |
-| **Working Tree Secrets Cleanup (`DEF-01`)** | Deleted `packaging/certs/UshaLabs.pfx` & `UshaLabs.cer`; added `.gitignore` exclusions; removed hardcoded password from `build_msix.ps1` and local path from `build_setup.ps1` | **PASS (HEAD)** — *Git history purge awaiting user approval* |
-| **Junction Loop & ZIP Bomb Caps** | `mklink /J` junction `0` hits; `>16 MB` DOCX bomb rejected cleanly | **PASS** |
-| **Credential Filenames** | Exact `.env`, `id_rsa`, `id_ed25519`, `*.key`, `*.pem`, `*.pfx` excluded (`0` hits); `live_created_id_ed25519` still indexes (`DEF-09` P2) | **PARTIAL (`DEF-09` P2)** |
+| **DEF-04** | **P2** | NTFS `FindFirstFileExW` traversal skips paths exceeding `MAX_PATH` (`260` chars) where extended `\\?\` prefix isn't handled for non-reconcile edge cases (note `FileIndexer::toLongPath` wraps `\\?\` for child probes; full deep >260 enumeration still needs explicit test). |
+| **DEF-05** | **P2** | Multi-token folder + filename cross-column queries (e.g. `"Quarterly Financial"` across dir + file) return `0` hits. |
+| **DEF-06** | **P2** | DOCX extraction reads `word/document.xml` only; `word/header*.xml` / `footer*.xml` ignored; legacy `.doc`/`.xls`/`.pptx` unsupported; no OCR on scanned PDFs. |
+| **DEF-07** | **P2** | Brute-force `O(N)` cosine scan exceeds `150 ms` if user raises cap above ~55k semantic chunks (mitigated operationally by Tier-2 scoping to Library folders + `5,000`-file default cap). |
+| **DEF-08** | **P2** | `5,000`-file content/semantic caps and `10 MB` max document limit should be clearly surfaced/documented in README/Settings; missing custom model path falls back to bundled model. |
+| **DEF-10** | **P2** | Local Whole-PC `29.29 MB` NSIS Setup & `35.05 MB` ZIP pass functional checks, while release binaries remain Authenticode `NotSigned` without an external EV/OV cert (`$env:LUMEN_SIGNING_PFX`). |
+| **DEF-11 / 12 / 13** | **P3** | `Ctrl+D` pin clears list selection (`DEF-11`); Inspector omits cosine score badge (`DEF-12`); Dark theme toggle not implemented (`DEF-13`). |
+| **Hardware / VM Coverage** | **Info** | Physical `125%`/`150%` scaling, multi-monitor, clean non-dev VM, native MS Word / LibreOffice PDFs, and 10/30-min endurance remain `NOT TESTED`. |
+
+*(Note: Previously open `DEF-09` for `live_created_id_ed25519` prefix filtering was closed by [`IndexingPolicy::shouldSkipFile`](src/indexing/IndexingPolicy.cpp), verified by `IndexingPolicy::shouldSkipFile(..., "id_ed25519_work", ...)` in `qa_wholepc_scale` `Test A`.)*
 
 ---
 
-## 13. Installer & Windows Distribution Review (`v0.5.1`)
-
-1. **NSIS Standalone Installer (`Lumen-v0.5.1-Setup-x64.exe`):** Built cleanly via [packaging/build_setup.ps1](packaging/build_setup.ps1) (`29.26 MB` Setup, `35.01 MB` portable ZIP). Isolated `/S /ISOLATEDTEST` install completed in `4.42 s` (`exit = 0`, `29` files including **`pdfium.dll`**, `onnxruntime.dll`, `Qt6*.dll`, `models\all-MiniLM-L6-v2\*`, `8` VC143 CRT DLLs, `ver = 0.5.1`, `pub = UshaLabs`); isolated uninstall removed all app/shortcut/registry items cleanly (`remaining_non_uninst = 0`, `reg_exists = False`). Still Authenticode **`NotSigned`** unless external `$env:LUMEN_SIGNING_PFX` / `$env:LUMEN_SIGNING_PASSWORD` are supplied at release time (`DEF-10` P2).
-2. **MSIX & Store Readiness (`build_msix.ps1`):** Externalized signing credentials cleanly (`-CertPfxPath`, `$env:LUMEN_SIGNING_PASSWORD`, `-SkipSigning`) and added `pdfium.dll` bundling; remains **not Store-ready** (`DEF-10`: omits MSVC CRT DLLs, requires `runFullTrust` + Store Publisher CN).
-
----
-
-## 14. Defect Register (`v0.5.0` → `v0.5.1`)
-
-| ID | Severity | Component | v0.5.1 Status & Verification Notes |
-|---|---|---|---|
-| **DEF-01** | **P1 — High** | [src/main.cpp](src/main.cpp), [packaging/build_setup.ps1](packaging/build_setup.ps1), [packaging/build_msix.ps1](packaging/build_msix.ps1), [.gitignore](.gitignore) | **RESOLVED in code/HEAD** (`Lumen.exe` verified zero debug/screenshot flags, zero local paths, zero `clearAllFiles()`; certs removed from HEAD; externalized signing params). **Action needed by repo owner:** Approve Git history rewrite/force-push to erase historical commit `05bc8da` and revoke exposed cert. |
-| **DEF-02** | **P1 — High** | [src/extraction/PdfiumBackend.cpp](src/extraction/PdfiumBackend.cpp), [src/extraction/DocumentExtractor.cpp](src/extraction/DocumentExtractor.cpp) | **RESOLVED & VERIFIED** via native PDFium (`chromium/8152`). Edge 3p/25p multi-column/table/Unicode PDFs + ISO `xref` synthetic PDFs + 80 concurrent MT extractions + end-to-end FTS page `3` lookup all pass. |
-| **DEF-03** | **P1 — High** | [src/indexing/DirectoryWatcher.cpp](src/indexing/DirectoryWatcher.cpp), [src/database/DatabaseManager.cpp](src/database/DatabaseManager.cpp), [src/indexing/FileIndexer.cpp](src/indexing/FileIndexer.cpp) | **RESOLVED & VERIFIED** across `107/107` populated, nested, 15-chain rapid, case-only, and offline-restart rename tests (`p50 = 26.72 ms`) plus `3.64 ms` watcher verification (`PRAGMA integrity_check = ok`). |
-| **DEF-04** | **P2 — Medium** | [src/indexing/FileIndexer.cpp](src/indexing/FileIndexer.cpp) | **OPEN (Out of v0.5.1 scope)** — Initial traversal still misses `>260`-char NTFS deep paths. |
-| **DEF-05** | **P2 — Medium** | [src/search/FileSearchEngine.cpp](src/search/FileSearchEngine.cpp) | **OPEN (Out of v0.5.1 scope)** — Multi-token folder+basename queries return `0` hits. |
-| **DEF-06** | **P2 — Medium** | [src/extraction/DocumentExtractor.cpp](src/extraction/DocumentExtractor.cpp) | **OPEN (Out of v0.5.1 scope)** — DOCX `word/header*.xml` / `footer*.xml` ignored. |
-| **DEF-07** | **P2 — Medium** | [src/search/FileSearchEngine.cpp](src/search/FileSearchEngine.cpp) | **OPEN (Out of v0.5.1 scope)** — `O(N)` brute-force vector scan exceeds `150 ms` at `100k` chunks (`262.42 ms` P95). |
-| **DEF-08** | **P2 — Medium** | [src/semantic/SemanticEmbeddingEngine.cpp](src/semantic/SemanticEmbeddingEngine.cpp), [src/core/SettingsManager.cpp](src/core/SettingsManager.cpp) | **OPEN (Out of v0.5.1 scope)** — Undocumented `5,000`-file content/semantic caps; missing-model override falls back to bundled dir. |
-| **DEF-09** | **P2 — Medium** | [src/indexing/DirectoryWatcher.cpp](src/indexing/DirectoryWatcher.cpp), [src/indexing/FileIndexer.cpp](src/indexing/FileIndexer.cpp) | **OPEN (Out of v0.5.1 scope)** — `live_created_id_ed25519` prefix gap leaks into live index. |
-| **DEF-10** | **P2 — Medium** | [packaging/Lumen.nsi](packaging/Lumen.nsi), [packaging/build_msix.ps1](packaging/build_msix.ps1) | **PARTIALLY OPEN** — Installer functional but unsigned until external CA cert supplied; MSIX lacks CRT & Store identity. |
-| **DEF-11** | **P3 — Low** | [src/ui/DesktopSearchBar/DesktopSearchBar.cpp](src/ui/DesktopSearchBar/DesktopSearchBar.cpp#L1387-L1397) | **OPEN (Out of v0.5.1 scope)** — `Ctrl+D` pin clears selection (`pre=1 → post=0`). |
-| **DEF-12** | **P3 — Low** | [src/ui/SearchResults/SearchPopupWidget.cpp](src/ui/SearchResults/SearchPopupWidget.cpp#L1310-L1515) | **OPEN (Out of v0.5.1 scope)** — Inspector omits semantic similarity score badge. |
-| **DEF-13** | **P3 — Low** | [src/ui/Theme.cpp](src/ui/Theme.cpp), [src/ui/Settings/SettingsDialog.cpp](src/ui/Settings/SettingsDialog.cpp) | **OPEN (Out of v0.5.1 scope)** — Dark theme unimplemented/stubbed. |
-| **DEF-14** | **P3 — Low** | [src/extraction/DeflateCodec.cpp](src/extraction/DeflateCodec.cpp#L395-L396), [benchmarks/phase2_benchmark.cpp](benchmarks/phase2_benchmark.cpp) | **OPEN (Out of v0.5.1 scope)** — Two `C4310` warnings in `DeflateCodec.cpp`; Phase 2 warm-cache sequencing artifact. |
-
----
-
-## 15. Acceptance Criteria Matrix (`v0.5.1`)
-
-| Requirement | Test Performed | Expected Result | Actual Result | Status |
-|---|---|---|---|---|
-| **Clean MSVC Release Build (`0.5.1`)** | Out-of-tree Ninja Release build + opt-in dev tools build | `0` errors, clean DLL IAT, `0.5.1.0` version | `47/47` steps (`103.56 s`), `0` errors | **PASS** |
-| **Security & Release Binary Hygiene (`DEF-01`)** | PE ASCII/UTF-16 audit, repo secret grep, `.gitignore` review | No test wipe flag, local paths, or repo secrets | `Lumen.exe` clean; certs purged from HEAD (history rewrite awaits user ok) | **PASS** *(History rewrite pending user ok)* |
-| **System Tray, Taskbar Exclusion & Hotkey** | `GWL_EXSTYLE`, position persistence, `TaskbarCreated`, `Ctrl+Alt+F9` | Zero taskbar presence, styles & anchor persist | All Win32 checks pass | **PASS** |
-| **Progressive 6-State UI & Transitions** | States A–F dimensions + `120` cycles + `1,000` stress cycles | `74px ↔ 506px ↔ 926px`, `0` crashes/leaks | `0` failures, stable handles (`352→367`) | **PASS** |
-| **Keyboard, Mouse Scroll, Context Menu, `CF_HDROP`** | Shortcuts, wheel, `8`-action context menu, Win32 clipboard | Expected actions & Explorer `CF_HDROP` | Pass except `Ctrl+D` selection clear (`DEF-11`) | **PARTIAL** |
-| **Multi-Scale Indexing (`10k–100k`)** | Physical NTFS + Phase 1 (`100,100` rows) + `200` queries | `< 50 ms` P95 search | Phase 1 `32.70 ms` P95; Physical `32.04 ms` P95 | **PASS** |
-| **Live Folder Rename Indexing (`DEF-03`)** | `107` populated/nested/chain-15/case/offline-restart trials + watcher | `0` missing, `0` stale, integrity `ok` | **`107/107` PASS** (`p50 = 26.72 ms`), watcher `3.64 ms` | **PASS** |
-| **Real-World PDF Extraction (`DEF-02`)** | Edge 2p/3p/25p PDFs + 80x MT + synthetic/enc/bad/scanned | Accurate page text & graceful failures | Edge `3p`/`25p`/`120p`/MT/index all pass; Word/LO unavailable | **PASS** *(Word/LO **BLOCKED**)* |
-| **Non-PDF Extraction (`DOCX/XLSX/CSV/Code/Media`)** | Bounded 27 non-PDF test cases + ZIP bomb | Safe, accurate text & metadata | Body/sheets/code/media pass; DOCX headers missed (`DEF-06`) | **PARTIAL** |
-| **Offline ONNX Validation & Relevance** | MiniLM INT8, `5` unload/reload cycles, `160` docs / `24` queries | `384-D` normalized, `0` leak, relevant hits | `Recall@10 = 1.0`, `MRR@10 = 1.0`, `0.25 MB` unloaded WS | **PASS** |
-| **Semantic Scalability (`100k` Chunks)** | Brute-force cosine scan `1k..100k` | `< 150 ms` P95 | `25.85 ms` (`10k`), `137.08 ms` (`50k`), **`262.42 ms` (`100k`)** | **FAIL (`100k` P2)** |
-| **Idle CPU (`<0.1%`) & RAM (`<120 MB`)** | `120 s` controlled UI idle | `< 0.1%` CPU, `< 120 MB` WS | **`0.000%` CPU**, **`41.04 MB` WS** (`10/30m` **NOT TESTED**) | **PASS** |
-| **SQLite WAL Integrity, Concurrency & Crash Recovery** | `10k` concurrent writes+reads, `TerminateProcess`, `v1→v4` migration | `integrity_check = ok`, zero corruption | `4,500` rows survived crash, `ok` (`Low Disk` **NOT TESTED**) | **PASS** |
-| **Display Scaling (`100%`/`150%`), Multi-Monitor & Themes** | `125%` (`1536×864`) tested; other displays unavailable | Full matrix validated | Only `125%` tested; Dark theme ignored | **NOT TESTED** / **PARTIAL** |
-| **NSIS Packaging & Clean Install** | Built `v0.5.1` Setup + ZIP, silent isolated install/uninstall | Self-contained install/uninstall (`pdfium.dll` incl.) | `4.42 s` install (`29` files), `0` leftover files; binaries `NotSigned` | **PARTIAL** (`NotSigned` P2) |
-
----
-
-## 16. Performance Regression Assessment (`v0.5.0` → `v0.5.1`)
-
-| Metric | Prior README Baseline | v0.5.0 Pre-Fix | v0.5.1 Post-Fix Measured | Regression Verdict |
-|---|---|---|---|---|
-| **UI Startup (`UI_STARTUP_SHOW_MS`)** | `33.83 ms` avg | `23.06 ms` | `29.65 ms` | **No Regression** (`< 35 ms`, >16× under 500 ms target) |
-| **Idle CPU (`2-Minute`)** | `0.0179%` | `0.000%` | **`0.000%`** (`120.022 s`) | **No Regression** |
-| **Idle WS RAM (`2-Minute`)** | `30.44 MB` | `41.31 MB` | **`41.04 MB`** | **No Regression** |
-| **100k Phase 1 Indexing** | `5.28 s` | `6.54 s` | **`5.89 s`** (`17,005/s`) | **Improved vs v0.5.0** |
-| **100k Phase 1 Search P95** | `10.89 ms` | `35.05 ms` | **`32.70 ms`** (Physical NTFS `32.04 ms`) | **No Regression vs v0.5.0** |
-| **Phase 2 PDF Extraction (`250 × 3p`)** | `—` | `8.98 ms/doc` (toy regex) | **`10.21 ms/doc` (real PDFium)** | **Acceptable** (+1.23 ms/doc for full ISO PDF spec compliance) |
-| **Phase 2 FTS5 Query P50 / P95** | `4.70 / 8.70 ms` | `2.11 / 3.28 ms` | **`1.65 / 2.79 ms`** | **Improved** |
-| **Phase 3 Semantic P50 / P95 (`250` chunks)** | `4.16 / 5.88 ms` | `3.74 / 4.91 ms` | **`3.26 / 4.09 ms`** | **Improved** |
-
----
-
-## 17. Known Limitations
-
-1. **No OCR Engine:** Scanned/image-only PDFs return `"No extractable text found in PDF."`.
-2. **Legacy Binary Office & Presentations:** `.doc`, `.xls`, and `.pptx` document bodies are unsupported; DOCX extraction reads `word/document.xml` only (headers/footers ignored, `DEF-06`).
-3. **Regex Lexical Code Indexing:** Source files use token extraction rather than compiler ASTs.
-4. **Default 5,000-File Caps & Linear Vector Scan:** Content & semantic indexing halt at `5,000` eligible files / `10 MB` max doc size by default; semantic queries exceed `150 ms` P95 around `>55k` vectors (`DEF-07`).
-5. **Unverified Environments:** Multi-DPI (`100%`, `150%`), `1920×1080` / `1366×768`, multi-monitor, MS Word / LibreOffice PDFs, `10`/`30`-min idle endurance, clean non-dev VM, and packet-capture trace.
-6. **Git History Secret Exposure:** Commit `05bc8da` still contains legacy `UshaLabs.pfx` in reachable Git history until owner approves a force-push history rewrite.
-
----
-
-## 18. Release Readiness Verdict
+## 12. Release Verdict & Recommended Next Steps
 
 ### Verdict: **`CONDITIONAL PASS — RELEASE CANDIDATE`**
 
-All three **P1 release blockers (`DEF-01`, `DEF-02`, `DEF-03`)** have been resolved and verified on clean Windows x64 Release builds with zero performance regressions:
-- `Lumen.exe` (`0.5.1.0`) is clean of developer flags/paths and `UshaLabs.pfx` + plaintext passwords are removed from `main` HEAD (pending optional history rewrite approval).
-- Native PDFium (`chromium/8152`) reliably extracts modern Chromium/Edge multi-page, multi-column, table, and Unicode PDFs with accurate page offsets.
-- Live and offline populated/nested folder renames passed `107/107` automated tests (`0` stale/missing entries, `PRAGMA integrity_check = ok`).
+The **2-Tier Whole-PC Indexing Architecture**, **Win32 IOCP Multi-Target Live Watcher**, **SQLite Schema `v6` (`folders_fts`) Million-Row Optimization**, **Logon Startup / Tray / Desktop Z-Order hardening**, **clean Release build & NSIS/ZIP repackaging**, and **all P1 fixes (`DEF-01`–`DEF-03`)** passed acceptance verification:
+- Real PC cold crawl (`151,303` items): **`37.11 s`**, **`25.27 MB` peak WS**, **`73.30 MB` DB**, live `steam` lookup in **`0.34 ms` (Folders) / `1.54 ms` (Files)**.
+- Live Whole-PC IOCP idle (`30 s`): **`0.00649%` CPU**, **`4.75 MB` WS**.
+- `1,000,000`-row synthetic DB: **`16.44 ms` P50 / `25.12 ms` P95 / `31.22 ms` Max**, **`29.38 MB` WS**, **`364.00 MB` DB**.
+- `150` directory renames (`100` live IOCP + `30` chain + `20` offline), schema `v4 -> v6` migration, Edge `157` headless PDF extraction (`PdfiumBackend`), scoped MiniLM ONNX semantic search (`unloadModel()` -> `0.24 MB` WS in Phase 3 / `16.29 MB` Priv in Edge test), `SettingsDialog` Whole-PC binding, and isolated `29.29 MB` NSIS Setup install/uninstall (`29` files, `0` leftovers) all passed with `0` failures.
 
-Remaining `P2`/`P3` items (`DEF-04`–`DEF-14`, including external Authenticode signing before public distribution) and unverified hardware/Office matrices justify Release Candidate status prior to broad public launch.
+### Recommended Actions Before Public Distribution
 
----
-
-## 19. Prioritized Remediation Plan (Post-v0.5.1 RC)
-
-1. **[Security — Owner Approval Needed]** Execute `git filter-repo` (or BFG) + coordinated force-push on `origin/main` to purge `packaging/certs/UshaLabs.pfx` and commit `05bc8da` password history; revoke the exposed certificate permanently.
-2. **[Release Engineering — Public Distribution]** Sign `Lumen.exe` and `Lumen-v0.5.1-Setup-x64.exe` via an EV/OV trusted Authenticode certificate injected cleanly through `$env:LUMEN_SIGNING_PFX` / `$env:LUMEN_SIGNING_PASSWORD` (`DEF-10`).
-3. **[P2 Stabilization Batch]** Fix extended `\\?\` `FindFirstFileExW` traversal (`DEF-04`), multi-token folder+basename queries (`DEF-05`), DOCX headers/footers (`DEF-06`), credential glob patterns `id_ed25519*` / `id_rsa*` (`DEF-09`), strict missing-model error mode + documented index caps (`DEF-08`), and scalable ANN vectors if raising `5,000`-file semantic cap (`DEF-07`).
-4. **[Validation Expansion]** Run multi-DPI (`100%`/`150%`), multi-monitor, native MS Word / LibreOffice PDF, clean-VM (no Qt/VS), and MSIX Store WACK checks (`DEF-10`–`DEF-14`).
-
----
-
-## 20. Final Project Assessment
-
-- **Current Application Maturity:** **Release Candidate (`v0.5.1`).** Resolving `DEF-01`–`DEF-03` closes the primary security hygiene, real-world PDF compatibility, and filesystem rename synchronization gaps identified in `v0.5.0`.
-- **Engineering Strengths:** Tiny static/runtime footprint, `0.000%` idle CPU, `41 MB` idle WS, fast physical NTFS indexing (`5.89 s` / `100k`), accurate PDFium text extraction (`18–24 ms` real browser PDFs, thread-safe), deterministic SQLite WAL + FTS5 subtree rename handling, and strong offline ONNX relevance (`Recall@10 = 1.0`, `0.25 MB` unload reclaim).
-- **Architecture Weaknesses & Scalability:** Linear `O(N)` vector scan above `~55k` chunks, hardcoded `5,000`-file content/semantic defaults, non-AST code indexing, `>260`-char initial crawl gap.
-- **Performance & Maintainability:** All latency and resource budgets hold cleanly across UI (`29.65 ms` startup, `1,000` stress cycles), filename (`32.04–32.70 ms` P95), FTS (`2.79 ms` P95), and interactive semantic (`<= 25.85 ms` P95 at `10k`) workloads. Codebase modularity improved further by isolating [PdfiumBackend](src/extraction/PdfiumBackend.cpp) and [tools/capture_screenshots.cpp](tools/capture_screenshots.cpp).
-- **Security Posture & Distribution:** Runtime network isolation (`0` net DLLs) and working-tree secrets cleanliness are solid; final pre-GA gates are owner-approved history cleanup for the historical `UshaLabs.pfx` commit and trusted Authenticode code signing for NSIS/portable deliverables.
+1. **Merge & Release Readiness:** Review branch `WholePC/Search` before merging into `main`.
+2. **Production Signing & History Hygiene:** Inject trusted Authenticode credentials (`$env:LUMEN_SIGNING_PFX` / `$env:LUMEN_SIGNING_PASSWORD`) at release build time (`DEF-10`) and execute owner-approved Git history purge for historical commit `05bc8da` (`DEF-01`).

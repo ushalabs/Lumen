@@ -73,6 +73,8 @@ set(LUMEN_LIB_SOURCES
     src/semantic/DocumentChunker.cpp
     src/semantic/SemanticEmbeddingEngine.h
     src/semantic/SemanticEmbeddingEngine.cpp
+    src/indexing/IndexingPolicy.h
+    src/indexing/IndexingPolicy.cpp
     src/indexing/DirectoryWatcher.h
     src/indexing/DirectoryWatcher.cpp
     src/indexing/FileIndexer.h

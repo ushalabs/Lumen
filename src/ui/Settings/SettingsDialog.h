@@ -40,6 +40,7 @@ private:
     QCheckBox* m_startWithWindowsCheck = nullptr;
     QLineEdit* m_shortcutEdit = nullptr;
 
+    QCheckBox* m_indexWholePcCheck = nullptr;
     QCheckBox* m_enableContentCheck = nullptr;
     QCheckBox* m_enableSemanticCheck = nullptr;
     QListWidget* m_watchedFoldersList = nullptr;

@@ -90,7 +90,7 @@ private:
 
 class DatabaseManager {
 public:
-    static constexpr int kCurrentSchemaVersion = 4;
+    static constexpr int kCurrentSchemaVersion = 6;
 
     static DatabaseManager& instance();
 
@@ -112,7 +112,10 @@ public:
     qint64 semanticEmbeddedFileCount() const;
 
     // Phase 1 writer and reconciliation operations (single-writer serialized via m_writeMutex)
+    qint64 countExistingFilesUnderRoot(const QString& rootDirectory) const;
+    QStringList queryImmediateChildPathsUnderDir(const QString& parentDirectory) const;
     QHash<QString, ExistingFileMeta> queryExistingFilesUnderRoot(const QString& rootDirectory) const;
+    QHash<QString, ExistingFileMeta> queryFileMetaByExactPaths(const QStringList& exactPaths) const;
     std::optional<ExistingFileMeta> queryFileMetaByPath(const QString& path) const;
 
     bool upsertFileBatch(const QVector<FileRecord>& records,
@@ -132,7 +135,9 @@ public:
     // Phase 2 Document Content Indexing operations
     QVector<ContentExtractionCandidate> queryCandidatesForContentExtraction(
         int maxTotalContentFiles = 5000,
-        qint64 maxFileSizeBytes = 10LL * 1024LL * 1024LL) const;
+        qint64 maxFileSizeBytes = 10LL * 1024LL * 1024LL,
+        const QStringList& allowedRoots = {},
+        bool restrictToAllowedRoots = false) const;
 
     bool upsertDocumentContentBatch(const QVector<DocumentContentRecord>& records,
                                     const std::atomic_bool* cancelFlag = nullptr);
@@ -141,7 +146,11 @@ public:
 
     // Phase 3 Semantic Chunk Indexing operations
     QVector<SemanticExtractionCandidate> queryCandidatesForSemanticIndexing(
-        int maxTotalSemanticFiles = 5000) const;
+        int maxTotalSemanticFiles = 5000,
+        const QStringList& allowedRoots = {},
+        bool restrictToAllowedRoots = false) const;
+
+    int pruneContentAndSemanticOutsideRoots(const QStringList& allowedRoots);
 
     bool replaceDocumentChunksBatch(const QVector<qint64>& fileIdsToClear,
                                     const QVector<DocumentChunkRecord>& records,

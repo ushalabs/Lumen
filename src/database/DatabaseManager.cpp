@@ -2,6 +2,7 @@
 
 #include "core/Logger.h"
 #include "extraction/DocumentExtractor.h"
+#include "indexing/IndexingPolicy.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -12,6 +13,47 @@
 #include <sqlite3.h>
 
 namespace lumen::database {
+
+namespace {
+QString buildPathScopeClause(const QStringList& allowedRoots,
+                             const QString& columnExpr,
+                             int firstBindIndex,
+                             QVector<QByteArray>* outBindings) {
+    QStringList rootClauses;
+    int bindIdx = firstBindIndex;
+    for (const QString& rawRoot : allowedRoots) {
+        const QString clean = indexing::IndexingPolicy::normalizeNativePath(rawRoot);
+        if (clean.isEmpty()) {
+            continue;
+        }
+        QString prefix = clean;
+        if (!prefix.endsWith(QLatin1Char('\\'))) {
+            prefix.append(QLatin1Char('\\'));
+        }
+        QString upper = prefix;
+        upper[upper.size() - 1] = QLatin1Char(']');
+
+        outBindings->append(clean.toUtf8());
+        const int idxExact = bindIdx++;
+        outBindings->append(prefix.toUtf8());
+        const int idxLow = bindIdx++;
+        outBindings->append(upper.toUtf8());
+        const int idxHigh = bindIdx++;
+
+        rootClauses.append(
+            QStringLiteral("(%1 = ?%2 COLLATE NOCASE OR (%1 >= ?%3 AND %1 < ?%4))")
+                .arg(columnExpr)
+                .arg(idxExact)
+                .arg(idxLow)
+                .arg(idxHigh));
+    }
+
+    if (rootClauses.isEmpty()) {
+        return QStringLiteral("(0)");
+    }
+    return QStringLiteral("(") + rootClauses.join(QStringLiteral(" OR ")) + QStringLiteral(")");
+}
+} // namespace
 
 ScopedStmt::~ScopedStmt() {
     reset();
@@ -412,6 +454,107 @@ bool DatabaseManager::applyMigrationsUnlocked() {
             executeSqlUnlocked("ROLLBACK;");
             return false;
         }
+        currentVersion = 4;
+    }
+
+    if (currentVersion < 5) {
+        const char* migrationV5Sql =
+            "BEGIN IMMEDIATE TRANSACTION;"
+            "CREATE INDEX IF NOT EXISTS idx_files_dir_name ON files(is_dir, name COLLATE NOCASE);";
+
+        if (!executeSqlUnlocked(migrationV5Sql)) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+
+        ScopedStmt insertVerStmt;
+        const char* insertVerSql =
+            "INSERT INTO schema_migrations(version, applied_at, description) VALUES (?1, ?2, ?3);";
+        if (sqlite3_prepare_v2(m_db, insertVerSql, -1, insertVerStmt.receive(), nullptr) != SQLITE_OK) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+
+        const qint64 nowEpoch = QDateTime::currentSecsSinceEpoch();
+        sqlite3_bind_int(insertVerStmt.get(), 1, 5);
+        sqlite3_bind_int64(insertVerStmt.get(), 2, nowEpoch);
+        sqlite3_bind_text(insertVerStmt.get(),
+                          3,
+                          "Composite (is_dir, name NOCASE) index for instant million-row prefix search",
+                          -1,
+                          SQLITE_STATIC);
+
+        if (sqlite3_step(insertVerStmt.get()) != SQLITE_DONE) {
+            insertVerStmt.reset();
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+        insertVerStmt.reset();
+
+        if (!executeSqlUnlocked("COMMIT;")) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+        currentVersion = 5;
+    }
+
+    if (currentVersion < 6) {
+        const char* migrationV6Sql =
+            "BEGIN IMMEDIATE TRANSACTION;"
+            "CREATE VIRTUAL TABLE IF NOT EXISTS folders_fts USING fts5("
+            "    name,"
+            "    extension,"
+            "    content='files',"
+            "    content_rowid='id',"
+            "    tokenize='trigram'"
+            ");"
+            "CREATE TRIGGER IF NOT EXISTS trg_folders_ai AFTER INSERT ON files WHEN new.is_dir = 1 BEGIN "
+            "    INSERT INTO folders_fts(rowid, name, extension) VALUES (new.id, new.name, new.extension); "
+            "END;"
+            "CREATE TRIGGER IF NOT EXISTS trg_folders_ad AFTER DELETE ON files WHEN old.is_dir = 1 BEGIN "
+            "    INSERT INTO folders_fts(folders_fts, rowid, name, extension) VALUES ('delete', old.id, old.name, old.extension); "
+            "END;"
+            "CREATE TRIGGER IF NOT EXISTS trg_folders_au_del AFTER UPDATE ON files WHEN old.is_dir = 1 BEGIN "
+            "    INSERT INTO folders_fts(folders_fts, rowid, name, extension) VALUES ('delete', old.id, old.name, old.extension); "
+            "END;"
+            "CREATE TRIGGER IF NOT EXISTS trg_folders_au_ins AFTER UPDATE ON files WHEN new.is_dir = 1 BEGIN "
+            "    INSERT INTO folders_fts(rowid, name, extension) VALUES (new.id, new.name, new.extension); "
+            "END;"
+            "INSERT INTO folders_fts(rowid, name, extension) SELECT id, name, extension FROM files WHERE is_dir = 1;";
+
+        if (!executeSqlUnlocked(migrationV6Sql)) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+
+        ScopedStmt insertVerStmt;
+        const char* insertVerSql =
+            "INSERT INTO schema_migrations(version, applied_at, description) VALUES (?1, ?2, ?3);";
+        if (sqlite3_prepare_v2(m_db, insertVerSql, -1, insertVerStmt.receive(), nullptr) != SQLITE_OK) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+
+        const qint64 nowEpoch = QDateTime::currentSecsSinceEpoch();
+        sqlite3_bind_int(insertVerStmt.get(), 1, 6);
+        sqlite3_bind_int64(insertVerStmt.get(), 2, nowEpoch);
+        sqlite3_bind_text(insertVerStmt.get(),
+                          3,
+                          "Dedicated folders_fts trigram index for sub-10ms 1M-row folder search",
+                          -1,
+                          SQLITE_STATIC);
+
+        if (sqlite3_step(insertVerStmt.get()) != SQLITE_DONE) {
+            insertVerStmt.reset();
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
+        insertVerStmt.reset();
+
+        if (!executeSqlUnlocked("COMMIT;")) {
+            executeSqlUnlocked("ROLLBACK;");
+            return false;
+        }
     }
 
     return true;
@@ -555,6 +698,97 @@ qint64 DatabaseManager::semanticEmbeddedFileCount() const {
     return 0;
 }
 
+qint64 DatabaseManager::countExistingFilesUnderRoot(const QString& rootDirectory) const {
+    QMutexLocker locker(&m_writeMutex);
+    if (m_db == nullptr) {
+        return 0;
+    }
+
+    QString normalizedRoot = indexing::IndexingPolicy::normalizeNativePath(rootDirectory);
+    if (normalizedRoot.isEmpty()) {
+        return 0;
+    }
+    if (!normalizedRoot.endsWith(QLatin1Char('\\'))) {
+        normalizedRoot.append(QLatin1Char('\\'));
+    }
+
+    QString upperBound = normalizedRoot;
+    upperBound[upperBound.size() - 1] = QLatin1Char(']');
+
+    const char* sql = "SELECT COUNT(*) FROM files WHERE path >= ?1 AND path < ?2;";
+    ScopedStmt stmt;
+    if (sqlite3_prepare_v2(m_db, sql, -1, stmt.receive(), nullptr) != SQLITE_OK) {
+        return 0;
+    }
+
+    const QByteArray lowerUtf8 = normalizedRoot.toUtf8();
+    const QByteArray upperUtf8 = upperBound.toUtf8();
+    sqlite3_bind_text(stmt.get(), 1, lowerUtf8.constData(), lowerUtf8.size(), SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt.get(), 2, upperUtf8.constData(), upperUtf8.size(), SQLITE_TRANSIENT);
+
+    if (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+        return sqlite3_column_int64(stmt.get(), 0);
+    }
+    return 0;
+}
+
+QStringList DatabaseManager::queryImmediateChildPathsUnderDir(const QString& parentDirectory) const {
+    QMutexLocker locker(&m_writeMutex);
+    QStringList children;
+    if (m_db == nullptr) {
+        return children;
+    }
+
+    QString dirPrefix = indexing::IndexingPolicy::normalizeNativePath(parentDirectory);
+    if (dirPrefix.isEmpty()) {
+        return children;
+    }
+    if (!dirPrefix.endsWith(QLatin1Char('\\'))) {
+        dirPrefix.append(QLatin1Char('\\'));
+    }
+    QString upperBound = dirPrefix;
+    upperBound[upperBound.size() - 1] = QLatin1Char(']');
+
+    const char* sql =
+        "SELECT path FROM files WHERE path >= ?1 AND path < ?2 ORDER BY path ASC LIMIT 1;";
+    ScopedStmt stmt;
+    if (sqlite3_prepare_v2(m_db, sql, -1, stmt.receive(), nullptr) != SQLITE_OK) {
+        return children;
+    }
+
+    const QByteArray upperUtf8 = upperBound.toUtf8();
+    const int prefixLen = dirPrefix.size();
+    QString cursor = dirPrefix;
+
+    // B-tree index-skip scan: jumps past each child's subtree in O(log N) per direct child
+    while (children.size() < 50000) {
+        const QByteArray cursorUtf8 = cursor.toUtf8();
+        sqlite3_bind_text(stmt.get(), 1, cursorUtf8.constData(), cursorUtf8.size(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt.get(), 2, upperUtf8.constData(), upperUtf8.size(), SQLITE_STATIC);
+
+        const int rc = sqlite3_step(stmt.get());
+        if (rc != SQLITE_ROW) {
+            break;
+        }
+        const char* rawPath = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 0));
+        const QString found = rawPath ? QString::fromUtf8(rawPath) : QString();
+        sqlite3_reset(stmt.get());
+        sqlite3_clear_bindings(stmt.get());
+
+        if (found.isEmpty() || found.size() <= prefixLen) {
+            break;
+        }
+
+        const int nextSep = found.indexOf(QLatin1Char('\\'), prefixLen);
+        const QString childPath = (nextSep > prefixLen) ? found.left(nextSep) : found;
+        children.append(childPath);
+
+        // Advance cursor past both childPath (file) and childPath\* (subtree: '\' + 1 = ']')
+        cursor = childPath + QLatin1Char(']');
+    }
+    return children;
+}
+
 QHash<QString, ExistingFileMeta> DatabaseManager::queryExistingFilesUnderRoot(const QString& rootDirectory) const {
     QMutexLocker locker(&m_writeMutex);
     QHash<QString, ExistingFileMeta> result;
@@ -562,7 +796,10 @@ QHash<QString, ExistingFileMeta> DatabaseManager::queryExistingFilesUnderRoot(co
         return result;
     }
 
-    QString normalizedRoot = QDir::toNativeSeparators(QDir::cleanPath(rootDirectory));
+    QString normalizedRoot = indexing::IndexingPolicy::normalizeNativePath(rootDirectory);
+    if (normalizedRoot.isEmpty()) {
+        return result;
+    }
     if (!normalizedRoot.endsWith(QLatin1Char('\\'))) {
         normalizedRoot.append(QLatin1Char('\\'));
     }
@@ -592,6 +829,41 @@ QHash<QString, ExistingFileMeta> DatabaseManager::queryExistingFilesUnderRoot(co
         if (rawPath != nullptr) {
             result.insert(QString::fromUtf8(rawPath), meta);
         }
+    }
+    return result;
+}
+
+QHash<QString, ExistingFileMeta> DatabaseManager::queryFileMetaByExactPaths(const QStringList& exactPaths) const {
+    QMutexLocker locker(&m_writeMutex);
+    QHash<QString, ExistingFileMeta> result;
+    if (m_db == nullptr || exactPaths.isEmpty()) {
+        return result;
+    }
+
+    ScopedStmt stmt;
+    const char* sql = "SELECT id, size, mtime, is_dir FROM files WHERE path = ?1 LIMIT 1;";
+    if (sqlite3_prepare_v2(m_db, sql, -1, stmt.receive(), nullptr) != SQLITE_OK) {
+        return result;
+    }
+
+    result.reserve(exactPaths.size());
+    for (const QString& rawPath : exactPaths) {
+        const QString clean = indexing::IndexingPolicy::normalizeNativePath(rawPath);
+        if (clean.isEmpty()) {
+            continue;
+        }
+        const QByteArray utf8 = clean.toUtf8();
+        sqlite3_bind_text(stmt.get(), 1, utf8.constData(), utf8.size(), SQLITE_STATIC);
+        if (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+            ExistingFileMeta meta;
+            meta.id = sqlite3_column_int64(stmt.get(), 0);
+            meta.size = sqlite3_column_int64(stmt.get(), 1);
+            meta.mtime = sqlite3_column_int64(stmt.get(), 2);
+            meta.isDir = (sqlite3_column_int(stmt.get(), 3) != 0);
+            result.insert(clean, meta);
+        }
+        sqlite3_reset(stmt.get());
+        sqlite3_clear_bindings(stmt.get());
     }
     return result;
 }
@@ -960,6 +1232,7 @@ bool DatabaseManager::clearAllFiles() {
         "DELETE FROM files;"
         "DELETE FROM indexing_checkpoints;"
         "INSERT INTO files_fts(files_fts) VALUES('rebuild');"
+        "INSERT INTO folders_fts(folders_fts) VALUES('rebuild');"
         "INSERT INTO document_fts(document_fts) VALUES('rebuild');"
         "COMMIT;";
     return executeSqlUnlocked(sql);
@@ -967,24 +1240,40 @@ bool DatabaseManager::clearAllFiles() {
 
 QVector<ContentExtractionCandidate> DatabaseManager::queryCandidatesForContentExtraction(
     int maxTotalContentFiles,
-    qint64 maxFileSizeBytes) const {
+    qint64 maxFileSizeBytes,
+    const QStringList& allowedRoots,
+    bool restrictToAllowedRoots) const {
     QMutexLocker locker(&m_writeMutex);
     QVector<ContentExtractionCandidate> candidates;
     if (m_db == nullptr || maxTotalContentFiles <= 0) {
         return candidates;
     }
+    if (restrictToAllowedRoots && allowedRoots.isEmpty()) {
+        return candidates;
+    }
 
-    // Count how many valid up-to-date documents are already content-indexed
+    QVector<QByteArray> countBindings;
+    const QString countScopeSql = restrictToAllowedRoots
+                                      ? (QStringLiteral(" AND ") + buildPathScopeClause(allowedRoots, QStringLiteral("f.path"), 1, &countBindings))
+                                      : QString();
+
+    // Count how many valid up-to-date documents inside scope are already content-indexed
     int existingValidCount = 0;
     {
-        ScopedStmt countStmt;
-        const char* countSql =
+        const QByteArray countSqlUtf8 = QStringLiteral(
             "SELECT COUNT(*) FROM document_content dc "
             "JOIN files f ON f.id = dc.file_id "
-            "WHERE dc.mtime = f.mtime;";
-        if (sqlite3_prepare_v2(m_db, countSql, -1, countStmt.receive(), nullptr) == SQLITE_OK &&
-            sqlite3_step(countStmt.get()) == SQLITE_ROW) {
-            existingValidCount = sqlite3_column_int(countStmt.get(), 0);
+            "WHERE dc.mtime = f.mtime%1;")
+                                            .arg(countScopeSql)
+                                            .toUtf8();
+        ScopedStmt countStmt;
+        if (sqlite3_prepare_v2(m_db, countSqlUtf8.constData(), -1, countStmt.receive(), nullptr) == SQLITE_OK) {
+            for (int i = 0; i < countBindings.size(); ++i) {
+                sqlite3_bind_text(countStmt.get(), i + 1, countBindings[i].constData(), countBindings[i].size(), SQLITE_STATIC);
+            }
+            if (sqlite3_step(countStmt.get()) == SQLITE_ROW) {
+                existingValidCount = sqlite3_column_int(countStmt.get(), 0);
+            }
         }
     }
 
@@ -1004,6 +1293,11 @@ QVector<ContentExtractionCandidate> DatabaseManager::queryCandidatesForContentEx
         }
     }
 
+    QVector<QByteArray> scopeBindings;
+    const QString scopeSql = restrictToAllowedRoots
+                                 ? (QStringLiteral("  AND ") + buildPathScopeClause(allowedRoots, QStringLiteral("f.path"), 3, &scopeBindings) + QLatin1Char('\n'))
+                                 : QString();
+
     const QString sqlQuery = QStringLiteral(
         "SELECT f.id, f.path, f.extension, f.size, f.mtime "
         "FROM files f "
@@ -1012,10 +1306,12 @@ QVector<ContentExtractionCandidate> DatabaseManager::queryCandidatesForContentEx
         "  AND ((f.extension IN (%1) COLLATE NOCASE AND f.size > 0 AND f.size <= ?1) "
         "   OR (f.extension IN (%2) COLLATE NOCASE AND f.size > 0)) "
         "  AND (dc.file_id IS NULL OR dc.mtime != f.mtime) "
+        "%3"
         "ORDER BY f.mtime DESC "
         "LIMIT ?2;")
                                  .arg(docAndCodeExts.join(QStringLiteral(", ")),
-                                      mediaExts.join(QStringLiteral(", ")));
+                                      mediaExts.join(QStringLiteral(", ")),
+                                      scopeSql);
     const QByteArray sqlUtf8 = sqlQuery.toUtf8();
     const char* sql = sqlUtf8.constData();
 
@@ -1026,6 +1322,9 @@ QVector<ContentExtractionCandidate> DatabaseManager::queryCandidatesForContentEx
 
     sqlite3_bind_int64(stmt.get(), 1, maxFileSizeBytes);
     sqlite3_bind_int(stmt.get(), 2, remainingBudget);
+    for (int i = 0; i < scopeBindings.size(); ++i) {
+        sqlite3_bind_text(stmt.get(), 3 + i, scopeBindings[i].constData(), scopeBindings[i].size(), SQLITE_STATIC);
+    }
 
     while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
         ContentExtractionCandidate cand;
@@ -1036,6 +1335,9 @@ QVector<ContentExtractionCandidate> DatabaseManager::queryCandidatesForContentEx
         cand.mtime = sqlite3_column_int64(stmt.get(), 4);
         cand.path = rawPath ? QString::fromUtf8(rawPath) : QString();
         cand.extension = rawExt ? QString::fromUtf8(rawExt).toLower() : QString();
+        if (restrictToAllowedRoots && !indexing::IndexingPolicy::isPathUnderAnyRoot(cand.path, allowedRoots)) {
+            continue;
+        }
         candidates.append(std::move(cand));
     }
     return candidates;
@@ -1125,23 +1427,40 @@ bool DatabaseManager::optimizeDocumentFtsIndex() {
 }
 
 QVector<SemanticExtractionCandidate> DatabaseManager::queryCandidatesForSemanticIndexing(
-    int maxTotalSemanticFiles) const {
+    int maxTotalSemanticFiles,
+    const QStringList& allowedRoots,
+    bool restrictToAllowedRoots) const {
     QMutexLocker locker(&m_writeMutex);
     QVector<SemanticExtractionCandidate> candidates;
     if (m_db == nullptr || maxTotalSemanticFiles <= 0) {
         return candidates;
     }
+    if (restrictToAllowedRoots && allowedRoots.isEmpty()) {
+        return candidates;
+    }
+
+    QVector<QByteArray> countBindings;
+    const QString countScopeSql = restrictToAllowedRoots
+                                      ? (QStringLiteral(" AND ") + buildPathScopeClause(allowedRoots, QStringLiteral("f.path"), 1, &countBindings))
+                                      : QString();
 
     int existingValidCount = 0;
     {
-        ScopedStmt countStmt;
-        const char* countSql =
+        const QByteArray countSqlUtf8 = QStringLiteral(
             "SELECT COUNT(DISTINCT ch.file_id) FROM document_chunks ch "
             "JOIN document_content dc ON dc.file_id = ch.file_id "
-            "WHERE ch.mtime = dc.mtime;";
-        if (sqlite3_prepare_v2(m_db, countSql, -1, countStmt.receive(), nullptr) == SQLITE_OK &&
-            sqlite3_step(countStmt.get()) == SQLITE_ROW) {
-            existingValidCount = sqlite3_column_int(countStmt.get(), 0);
+            "JOIN files f ON f.id = ch.file_id "
+            "WHERE ch.mtime = dc.mtime%1;")
+                                            .arg(countScopeSql)
+                                            .toUtf8();
+        ScopedStmt countStmt;
+        if (sqlite3_prepare_v2(m_db, countSqlUtf8.constData(), -1, countStmt.receive(), nullptr) == SQLITE_OK) {
+            for (int i = 0; i < countBindings.size(); ++i) {
+                sqlite3_bind_text(countStmt.get(), i + 1, countBindings[i].constData(), countBindings[i].size(), SQLITE_STATIC);
+            }
+            if (sqlite3_step(countStmt.get()) == SQLITE_ROW) {
+                existingValidCount = sqlite3_column_int(countStmt.get(), 0);
+            }
         }
     }
 
@@ -1150,22 +1469,39 @@ QVector<SemanticExtractionCandidate> DatabaseManager::queryCandidatesForSemantic
         return candidates;
     }
 
-    const char* sql =
-        "SELECT dc.file_id, dc.mtime, dc.body_text, dc.page_offsets_json "
+    QVector<QByteArray> scopeBindings;
+    const QString scopeSql = restrictToAllowedRoots
+                                 ? (QStringLiteral("  AND ") + buildPathScopeClause(allowedRoots, QStringLiteral("f.path"), 2, &scopeBindings) + QLatin1Char('\n'))
+                                 : QString();
+
+    const QByteArray sqlUtf8 = QStringLiteral(
+        "SELECT dc.file_id, dc.mtime, dc.body_text, dc.page_offsets_json, f.path "
         "FROM document_content dc "
+        "JOIN files f ON f.id = dc.file_id "
         "LEFT JOIN document_chunks ch ON ch.file_id = dc.file_id AND ch.chunk_index = 0 "
         "WHERE dc.char_count > 0 "
         "  AND (ch.id IS NULL OR ch.mtime != dc.mtime) "
+        "%1"
         "ORDER BY dc.mtime DESC "
-        "LIMIT ?1;";
+        "LIMIT ?1;")
+                                   .arg(scopeSql)
+                                   .toUtf8();
 
     ScopedStmt stmt;
-    if (sqlite3_prepare_v2(m_db, sql, -1, stmt.receive(), nullptr) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(m_db, sqlUtf8.constData(), -1, stmt.receive(), nullptr) != SQLITE_OK) {
         return candidates;
     }
     sqlite3_bind_int(stmt.get(), 1, remainingBudget);
+    for (int i = 0; i < scopeBindings.size(); ++i) {
+        sqlite3_bind_text(stmt.get(), 2 + i, scopeBindings[i].constData(), scopeBindings[i].size(), SQLITE_STATIC);
+    }
 
     while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+        const char* rawPath = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 4));
+        const QString filePath = rawPath ? QString::fromUtf8(rawPath) : QString();
+        if (restrictToAllowedRoots && !indexing::IndexingPolicy::isPathUnderAnyRoot(filePath, allowedRoots)) {
+            continue;
+        }
         SemanticExtractionCandidate cand;
         cand.fileId = sqlite3_column_int64(stmt.get(), 0);
         cand.mtime = sqlite3_column_int64(stmt.get(), 1);
@@ -1176,6 +1512,65 @@ QVector<SemanticExtractionCandidate> DatabaseManager::queryCandidatesForSemantic
         candidates.append(std::move(cand));
     }
     return candidates;
+}
+
+int DatabaseManager::pruneContentAndSemanticOutsideRoots(const QStringList& allowedRoots) {
+    QMutexLocker locker(&m_writeMutex);
+    if (m_db == nullptr) {
+        return 0;
+    }
+
+    QVector<qint64> toDeleteIds;
+    {
+        ScopedStmt stmt;
+        const char* sql =
+            "SELECT DISTINCT dc.file_id, f.path "
+            "FROM document_content dc "
+            "JOIN files f ON f.id = dc.file_id;";
+        if (sqlite3_prepare_v2(m_db, sql, -1, stmt.receive(), nullptr) != SQLITE_OK) {
+            return 0;
+        }
+        while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+            const qint64 fid = sqlite3_column_int64(stmt.get(), 0);
+            const char* rawPath = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 1));
+            const QString filePath = rawPath ? QString::fromUtf8(rawPath) : QString();
+            if (allowedRoots.isEmpty() || !indexing::IndexingPolicy::isPathUnderAnyRoot(filePath, allowedRoots)) {
+                toDeleteIds.append(fid);
+            }
+        }
+    }
+
+    if (toDeleteIds.isEmpty()) {
+        return 0;
+    }
+
+    if (!executeSqlUnlocked("BEGIN IMMEDIATE TRANSACTION;")) {
+        return 0;
+    }
+
+    ScopedStmt delChunks;
+    ScopedStmt delContent;
+    if (sqlite3_prepare_v2(m_db, "DELETE FROM document_chunks WHERE file_id = ?1;", -1, delChunks.receive(), nullptr) != SQLITE_OK ||
+        sqlite3_prepare_v2(m_db, "DELETE FROM document_content WHERE file_id = ?1;", -1, delContent.receive(), nullptr) != SQLITE_OK) {
+        executeSqlUnlocked("ROLLBACK;");
+        return 0;
+    }
+
+    for (qint64 fid : toDeleteIds) {
+        sqlite3_bind_int64(delChunks.get(), 1, fid);
+        sqlite3_step(delChunks.get());
+        sqlite3_reset(delChunks.get());
+
+        sqlite3_bind_int64(delContent.get(), 1, fid);
+        sqlite3_step(delContent.get());
+        sqlite3_reset(delContent.get());
+    }
+
+    if (!executeSqlUnlocked("COMMIT;")) {
+        executeSqlUnlocked("ROLLBACK;");
+        return 0;
+    }
+    return static_cast<int>(toDeleteIds.size());
 }
 
 bool DatabaseManager::replaceDocumentChunksBatch(const QVector<qint64>& fileIdsToClear,
@@ -1312,7 +1707,9 @@ bool DatabaseManager::optimizeFtsIndex() {
     if (m_db == nullptr) {
         return false;
     }
-    return executeSqlUnlocked("INSERT INTO files_fts(files_fts) VALUES('optimize');");
+    return executeSqlUnlocked(
+        "INSERT INTO files_fts(files_fts) VALUES('optimize');"
+        "INSERT INTO folders_fts(folders_fts) VALUES('optimize');");
 }
 
 bool DatabaseManager::walCheckpointTruncate() {
